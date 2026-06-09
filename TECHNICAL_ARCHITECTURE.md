@@ -1,33 +1,53 @@
-# Technical Architecture: Professional Stock Analysis Platform
+# Technical Architecture: Personal A-Share Research Terminal
 
 ## 1. Architecture Goal
 
-Build a professional, data-backed stock analysis platform that can grow from a reliable MVP into a real-time research terminal. The architecture must support market data ingestion, financial statement analysis, news and event intelligence, recommendation scoring, model validation, portfolio risk, alerts, audit logs, and bilingual product output.
+Build a personal, data-backed A-share research terminal that can run after market close and produce candidate lists, explanations, reports, and backtest evidence.
 
-The first implementation should optimize for correctness, traceability, and professional usability before complex automation.
+The first implementation should optimize for correctness, traceability, reproducibility, and daily personal usability before web UI, real-time updates, or complex institutional infrastructure.
 
 The recommendation universe is limited to the Chinese stock market. Version 1 should focus on mainland China A-share individual stocks. CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices should be used as benchmark context. ETFs are optional extensions. US stocks, Hong Kong stocks, China ADRs, and global equities should not appear in recommendation lists or stock detail pages unless the product scope is changed later.
 
-## 2. Version 1 Architecture Decisions
+## 2. MVP Architecture Decisions
 
 | Area | Decision |
 | --- | --- |
-| Frontend | React + TypeScript |
-| Backend API | Python FastAPI |
-| Primary database | PostgreSQL |
-| Cache / hot data | Redis |
-| Background jobs | Python worker process, scheduled jobs, and queue-based tasks |
-| Market data phase | Provider abstraction with delayed or near-real-time data depending on vendor access |
+| Phase 1 runtime | Local Python research pipeline / CLI |
+| Phase 1 update mode | Daily after market close |
+| Phase 1 storage | Local file cache and normalized DataFrames |
+| Phase 1 output | Markdown/html reports, CSV/JSON artifacts where useful |
+| Frontend | Phase 2, React + TypeScript |
+| Backend API | Phase 2, Python FastAPI |
+| Primary database | Phase 2 or later, PostgreSQL when persistence needs outgrow local files |
+| Cache / hot data | Local cache first; Redis later if dashboard or real-time needs require it |
+| Background jobs | Local scheduled run first; worker queue later |
+| Market data phase | Provider abstraction with daily data; no tick data in Phase 1 |
 | Market scope | Mainland China A-shares only: Shanghai, Shenzhen, and Beijing exchanges |
 | Analysis scope | A-share individual stocks first; CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices as benchmarks |
 | ETF scope | Optional extension only |
 | Prototype data source | AKShare and BaoStock first, Tushare Pro optional |
-| Model phase | Rule-based scoring first, interpretable ML later |
+| Recommendation language | `候选关注`, `重点观察`, `观察`, `风险过高` |
+| Model phase | Factor scoring and walk-forward backtesting first; advanced ML later |
 | Language | Default Chinese UI with `zh-CN` and `en-US` internationalization support |
-| Deployment style | Docker-based local development, cloud-ready services later |
-| Public advice boundary | Research decision-support with clear risk disclosure and audit trail |
+| Deployment style | Local personal workflow first; deployment later |
+| Product boundary | Personal research only; no public investment advisory service |
 
-## 3. High-Level System Map
+## 3. Phase 1 System Map
+
+```mermaid
+flowchart LR
+    Providers["AKShare / BaoStock / Optional Tushare"] --> DataService["Provider Layer + Unified Schema"]
+    DataService --> Cache["Local Cache"]
+    Cache --> Filters["A-Share Filters"]
+    Filters --> Factors["Factor Calculation"]
+    Factors --> Scoring["Composite Scoring"]
+    Scoring --> Explain["Factor Explanation + Signal Conflicts"]
+    Explain --> Reports["Markdown / HTML Reports"]
+    Scoring --> Backtest["Walk-Forward Backtest"]
+    Backtest --> Reports
+```
+
+## 4. Long-Term System Map
 
 ```mermaid
 flowchart LR
@@ -43,9 +63,11 @@ flowchart LR
     API --> Audit["Audit Log"]
 ```
 
-## 4. Frontend Architecture
+## 5. Frontend Architecture
 
-### 4.1 Main Application Areas
+Frontend is a Phase 2 concern. Do not build it before Phase 1 can generate useful daily research outputs.
+
+### 5.1 Future Main Application Areas
 
 - Market overview.
 - Recommendation center.
@@ -55,7 +77,7 @@ flowchart LR
 - Alerts.
 - Data quality and admin.
 
-### 4.2 Frontend Principles
+### 5.2 Frontend Principles
 
 - The first screen should be the professional dashboard, not a marketing landing page.
 - Use dense but readable layouts: tables, charts, heatmaps, tabs, filters, and side panels.
@@ -64,7 +86,7 @@ flowchart LR
 - Show data freshness and source status near market-sensitive data.
 - Separate facts, analyst interpretation, and model output visually.
 
-### 4.3 Suggested Frontend Structure
+### 5.3 Suggested Frontend Structure
 
 ```text
 frontend/
@@ -91,7 +113,7 @@ frontend/
     utils/
 ```
 
-### 4.4 Internationalization
+### 5.4 Internationalization
 
 Default language is Chinese (`zh-CN`). English (`en-US`) should be available through a language switcher.
 
@@ -110,50 +132,45 @@ Example language behavior:
 | `zh-CN` | Chinese | Chinese | Local/common Chinese name when available, ticker always visible |
 | `en-US` | English | English | English company name, ticker always visible |
 
-## 5. Backend Architecture
+## 6. Backend Architecture
 
-### 5.1 Backend Responsibilities
+FastAPI is a Phase 2 concern. Phase 1 should expose reusable Python modules and CLI commands first.
+
+### 6.1 Phase 1 Python Responsibilities
+
+- Fetch and normalize daily A-share data.
+- Cache market data.
+- Filter the A-share universe.
+- Calculate factors.
+- Rank candidates.
+- Explain factor contributions and signal conflicts.
+- Generate markdown/html reports.
+- Run walk-forward backtests.
+
+### 6.2 Future FastAPI Responsibilities
 
 - Serve normalized market, stock, financial, event, recommendation, risk, portfolio, and alert data.
-- Enforce authentication and role-based access.
+- Enforce minimal local/personal access rules if needed later.
 - Keep API responses traceable to data source and update time.
 - Trigger recommendation recalculation when relevant inputs change.
 - Store recommendation and model version history.
 
-### 5.2 Suggested Backend Structure
+### 6.3 Phase 1 File Structure
 
 ```text
 backend/
-  app/
-    main.py
-    core/
-      config.py
-      security.py
-      i18n.py
-    routes/
-      market.py
-      stocks.py
-      recommendations.py
-      portfolios.py
-      alerts.py
-      admin.py
-    schemas/
-    models/
-    repositories/
-    services/
-      market_data.py
-      fundamentals.py
-      filings.py
-      events.py
-      scoring.py
-      risk.py
-      portfolio.py
-      audit.py
-    workers/
-    tests/
+  src/stock_analysis/
+    data/
+    research/
+    reports/
+    backtesting/
+    cli/
+  tests/
 ```
 
-### 5.3 API Design Principles
+See `PHASE1_TASKS.md` for the detailed task-level structure.
+
+### 6.4 Future API Design Principles
 
 - APIs should expose timestamps and source metadata with market-sensitive data.
 - Recommendation APIs must include rating, horizon, confidence, risks, evidence, invalidation condition, source timestamps, and model/rule version.
@@ -161,14 +178,16 @@ backend/
 - Do not let frontend calculate core financial or recommendation logic.
 - Use typed schemas for all external responses.
 
-## 6. Data Architecture
+## 7. Data Architecture
 
 ### 6.1 Storage Types
 
 | Storage | Purpose |
 | --- | --- |
-| PostgreSQL | Users, stocks, financial statements, recommendations, portfolios, alerts, audit logs |
-| Redis | Latest quotes, hot dashboard data, rate limits, short-lived alert state |
+| Local file cache | Phase 1 daily bars and provider response caching |
+| CSV/JSON/Markdown/HTML artifacts | Phase 1 research outputs and reports |
+| PostgreSQL later | Phase 2+ persistent recommendations, history, watchlist, holdings |
+| Redis later | Hot dashboard data or alerts if needed |
 | Object storage later | Raw filings, parsed reports, model artifacts |
 | Search/vector index later | News, filings, report chunks, semantic evidence retrieval |
 
@@ -196,20 +215,20 @@ backend/
 - ModelVersion.
 - AuditLog.
 
-### 6.3 Data Freshness
+### 7.3 Data Freshness
 
 Every major data group needs a freshness policy:
 
 | Data | MVP Refresh Policy |
 | --- | --- |
-| Quote | Vendor-dependent; show delay clearly |
-| Historical price | Daily after market close; intraday if available |
-| Fundamentals | After filing or vendor update |
-| News/events | Polling first, streaming later |
+| Daily bars | Phase 1: after market close |
+| Benchmark indices | Phase 1: after market close |
+| Fundamentals | Phase 3 |
+| News/events | Phase 4 |
 | Recommendations | Recalculate when input data changes |
-| Portfolio risk | Recalculate after quote or position changes |
+| Portfolio risk | Phase 5 |
 
-## 7. Data Ingestion Pipeline
+## 8. Data Ingestion Pipeline
 
 ### 7.1 Pipeline Stages
 
@@ -234,7 +253,7 @@ Each data provider should implement the same internal interface:
 
 The system should be able to replace a vendor without rewriting business logic.
 
-## 8. Recommendation Engine Architecture
+## 9. Recommendation Engine Architecture
 
 ### 8.1 V1 Engine
 
@@ -242,7 +261,7 @@ The first engine should be deterministic and explainable:
 
 - Calculate factor scores.
 - Apply weighting rules.
-- Generate recommendation label.
+- Generate personal research candidate label.
 - Generate risk flags.
 - Generate thesis lifecycle state.
 - Store input snapshot and version.
@@ -271,16 +290,23 @@ Every recommendation record must store:
 - Source references.
 - User or system actor.
 
-## 9. Model And Backtesting Architecture
+Allowed Phase 1 labels:
+
+- `候选关注`
+- `重点观察`
+- `观察`
+- `风险过高`
+
+## 10. Model And Backtesting Architecture
 
 ### 9.1 Model Progression
 
-1. Rule-based scoring.
-2. Backtested factor model.
-3. Earnings surprise model.
-4. Drawdown risk model.
-5. Event-aware model.
-6. Ensemble scenario model.
+1. Factor scoring.
+2. Walk-forward backtested factor model.
+3. Drawdown and risk model.
+4. Earnings surprise model later.
+5. Event-aware model later.
+6. Ensemble scenario model later.
 
 ### 9.2 Backtesting Rules
 
@@ -304,7 +330,9 @@ Required outputs:
 - Model version.
 - Validation status.
 
-## 10. Alerts And Real-Time Layer
+## 11. Alerts And Real-Time Layer
+
+Alerts and real-time updates are not Phase 1. Phase 1 uses daily after-close updates.
 
 ### 10.1 Alert Types
 
@@ -328,14 +356,13 @@ Real-time UI must show:
 - Delay status.
 - Stale data warning.
 
-## 11. Security, Compliance, And Audit
+## 12. Personal Boundary, Safety, And Audit
 
 ### 11.1 Security
 
-- Use server-side secrets only.
-- Do not expose vendor keys to frontend.
-- Add role-based access for admin and analyst tools.
-- Log important data and recommendation changes.
+- Keep provider tokens out of committed files.
+- Do not expose vendor keys in reports.
+- Log important data, scoring, and report generation changes where useful.
 
 ### 11.2 Compliance
 
@@ -343,19 +370,22 @@ Real-time UI must show:
 - Store recommendation history.
 - Store analyst overrides and reasons.
 - Distinguish data facts from model forecasts.
-- Require legal review before public investment-advice launch.
+- Avoid public investment-advice language.
+- Treat outputs as personal research notes unless the product scope changes later.
 
-## 12. Development Phases
+## 13. Development Phases
 
-### Phase A: Documentation And Architecture
+### Phase 1: Daily A-Share Research Pipeline
 
-- PRD.
-- Production workflow.
-- Technical architecture.
-- Data source decision.
-- MVP user stories.
+- Data.
+- Filters.
+- Factors.
+- Scoring.
+- Explanations.
+- Reports.
+- Walk-forward backtests.
 
-### Phase B: Project Scaffolding
+### Phase 2: FastAPI + Simple Dashboard
 
 - React frontend.
 - FastAPI backend.
@@ -363,7 +393,7 @@ Real-time UI must show:
 - Redis configuration.
 - Basic Docker development environment.
 
-### Phase C: Mock Data MVP
+### Phase 3: Fundamentals, Valuation, Industry, And History
 
 - Professional Chinese-first dashboard UI.
 - Stock detail page.
@@ -371,37 +401,30 @@ Real-time UI must show:
 - Watchlist.
 - Mock recommendation scoring.
 
-### Phase D: Real Data Integration
+### Phase 4: Events And Thesis Lifecycle
 
 - Market data provider.
 - Fundamentals provider.
 - Filing/news provider.
 - Data freshness dashboard.
 
-### Phase E: Recommendation And Risk
+### Phase 5: Personal Watchlist, Holdings, Risk, And Alerts
 
 - Rule-based scoring.
 - Risk flags.
 - Recommendation history.
 - Thesis lifecycle.
 
-### Phase F: Backtesting And Modeling
+### Phase 6: Advanced Data, Models, Real-Time, And Deployment
 
 - Backtest engine.
 - Validation reports.
 - Interpretable forecasts.
 
-### Phase G: Alerts, Portfolio, And Hardening
-
-- Portfolio risk.
-- Alerts.
-- Audit logs.
-- Admin tools.
-- Deployment hardening.
-
-## 13. Acceptance Criteria For Architecture Completion
+## 14. Acceptance Criteria For Architecture Completion
 
 - The repo contains PRD, production workflow, implementation plan, and technical architecture.
 - The architecture clearly identifies frontend, backend, data, recommendation, model, alert, i18n, audit, and deployment boundaries.
 - Language requirements are explicit: Chinese default with English switch support.
-- The next implementation step can scaffold the project without choosing core technologies again.
+- Phase 1 is clearly limited to daily research pipeline work.
+- The next implementation step can build Phase 1 modules without choosing core boundaries again.

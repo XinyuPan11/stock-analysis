@@ -1,10 +1,10 @@
-# Product Requirements Document: Professional Stock Analysis Platform
+# Product Requirements Document: Personal A-Share Research Terminal
 
 ## 1. Product Summary
 
-Stock Analysis is a professional stock research and recommendation platform for analysts, advanced investors, and portfolio managers. The system helps users discover opportunities, inspect evidence, understand risk, monitor thesis changes, and evaluate recommendations with transparent data.
+Stock Analysis is a personal A-share professional research terminal for daily after-close research. It helps the user find candidate A-share stocks, inspect evidence, understand risk, validate signals with backtests, and generate professional research reports.
 
-The product is not a simple stock-tip website. Every recommendation must be supported by source data, timestamps, financial evidence, event context, model signals, and risk warnings.
+The product is not a public investment advisory platform and does not provide public buy/sell advice. Every candidate result must be supported by data source, data date, update time, evidence chain, risk counter-evidence, uncertainty, and follow-up conditions.
 
 ## 2. Product Decisions For Version 1
 
@@ -12,51 +12,101 @@ The product is not a simple stock-tip website. Every recommendation must be supp
 | --- | --- |
 | First market | Mainland China A-shares: Shanghai Stock Exchange, Shenzhen Stock Exchange, and Beijing Stock Exchange |
 | Reason | The product will focus only on the Chinese stock market; A-shares provide the core universe for China-focused equity research, policy analysis, sector rotation, and domestic capital-market monitoring |
-| First user type | Professional or advanced research user |
-| Product type | Decision-support research terminal |
-| Recommendation style | Evidence-backed ratings, scenario ranges, risk warnings, and thesis status |
-| Real-time target | Near-real-time where licensed data is available; delayed or cached data is acceptable for the first prototype if freshness is clearly shown |
+| First user type | Personal professional research user |
+| Product type | Personal A-share research terminal |
+| Recommendation style | Evidence-backed candidate labels, not deterministic buy/sell advice |
+| Update target | Daily after market close |
 | Product language | Chinese-first UI with optional Chinese/English switching |
 | Analysis target | A-share individual stocks |
 | Benchmark context | CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices |
 | ETF scope | Optional extension, not a primary version 1 recommendation target |
 | Prototype data strategy | Use AKShare and BaoStock first, with Tushare Pro optional; keep provider abstraction ready for Wind, Choice, and iFinD |
-| Public advice boundary | The platform must include risk disclosures and should not launch public investment advice without legal review |
+| Phase 1 boundary | Data, filters, factors, scoring, explanations, reports, and walk-forward backtesting only |
+| Public advice boundary | Personal research only; no public investment advisory service, paid subscription, or public buy/sell recommendations |
 
-The recommendation universe is limited to mainland China A-share individual stocks. Hong Kong stocks, US stocks, China ADRs, and global equities are excluded unless the product scope is explicitly changed later. CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices are required benchmark context. China ETFs are optional extensions, not primary recommendation targets in version 1.
+The recommendation universe is limited to mainland China A-share individual stocks. Hong Kong stocks, US stocks, China ADRs, and global equities are excluded unless the product scope is explicitly changed later. CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices are required benchmark context. China ETFs are optional future extensions, not Phase 1 recommendation targets.
 
 ## 3. Target Users
 
-### 3.1 Professional Analyst
+### 3.1 Primary User
 
-Needs to quickly inspect a stock, validate a thesis, read financial report changes, compare peers, and monitor events that may change the recommendation.
+The primary user is the owner of this repository, using the terminal for personal daily A-share research.
 
-### 3.2 Portfolio Manager
+Needs:
 
-Needs to understand portfolio exposure, position risk, sector concentration, correlation, and whether a new recommendation improves or worsens portfolio risk.
+- after-close A-share candidate discovery;
+- professional explanation for why a stock ranks highly;
+- risk counter-evidence, not only positive signals;
+- walk-forward backtest support;
+- markdown/html reports that can be reviewed later;
+- data source, data date, update time, and uncertainty shown everywhere.
 
-### 3.3 Advanced Investor
+### 3.2 Future User Modes
 
-Needs evidence-backed stock analysis, not unsupported buy/sell signals. Wants source links, risk explanations, and clear reasoning.
+Future phases may add watchlist, personal holdings, alerts, dashboard views, and more advanced report review. Complex roles, subscriptions, and institutional access are out of scope.
 
-### 3.4 Admin / Research Lead
+## 4. MVP Scope
 
-Needs to manage data quality, recommendation rules, analyst overrides, model versions, audit logs, and compliance controls.
+### 4.1 Phase 1 In Scope
 
-## 4. Version 1 Scope
+- A-share stock universe.
+- Daily close data after market close.
+- Local cache and incremental update plan.
+- A-share filters.
+- Momentum, trend, relative strength, risk, and liquidity factors.
+- Composite scoring.
+- Top 10 and Top 20 candidate lists.
+- Recommendation labels:
+  - `候选关注`
+  - `重点观察`
+  - `观察`
+  - `风险过高`
+- Factor explanation.
+- Signal conflict detection.
+- Daily recommendation report.
+- Single-stock report.
+- Walk-forward backtest against CSI 300, CSI 500, and ChiNext Index.
+- Data source, data date, update time, risk warning, and uncertainty in all outputs.
 
-### 4.1 In Scope
+### 4.2 Later Phase Scope
 
-- Market overview dashboard.
-- Stock search.
+- FastAPI and simple frontend dashboard.
 - Stock detail page.
-- Recommendation center.
-- Watchlist.
-- Basic portfolio tracking.
-- Financial statement summary.
+- Index and industry comparison pages.
+- Financial metrics.
 - Valuation metrics.
-- News and event panel.
-- Risk dashboard.
+- Recommendation history.
+- Announcements, news, policy events.
+- Thesis lifecycle.
+- Watchlist.
+- Personal holdings.
+- Risk monitoring and reminders.
+- More professional data sources.
+- More advanced models.
+
+### 4.3 Out Of Scope For Phase 1
+
+- Public investment advisory service.
+- Paid subscription.
+- Complex user or permission system.
+- Public buy/sell recommendations.
+- Real-time tick data.
+- Wind / Choice / iFinD integration.
+- News and announcement ingestion.
+- Deep financial statement analysis.
+- Watchlist and holdings monitor.
+- FastAPI and web dashboard.
+- ETF recommendation workflows.
+- Trade execution.
+- Brokerage integration.
+- Fully automated high-frequency trading.
+- Multi-market global coverage.
+- Hard-coded single-language UI strings.
+
+<!-- Historical platform scope below remains as long-term reference, but Phase 1 is governed by MVP_ROADMAP.md and PROJECT_RULES.md. -->
+
+### 4.4 Long-Term Reference Scope
+
 - Evidence-backed recommendation labels.
 - Data freshness indicators.
 - Recommendation history.
@@ -66,22 +116,37 @@ Needs to manage data quality, recommendation rules, analyst overrides, model ver
 - Internationalization foundation for Chinese/English switching.
 - Benchmark views for CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices.
 
-### 4.2 Out Of Scope For Version 1
+## 5. Phase 1 Core User Journeys
 
-- Trade execution.
-- Brokerage integration.
-- Public paid investment advisory launch.
-- Fully automated high-frequency trading.
-- Guaranteed real-time tick feed.
-- Complex deep learning model as the first production model.
-- Multi-market global coverage on day one.
-- US stocks, Hong Kong stocks, China ADRs, or global equity recommendations.
-- ETF recommendation workflows.
-- Hard-coded single-language UI strings.
+### 5.1 Run Daily Research
 
-## 5. Core User Journeys
+1. User runs the after-close daily research command.
+2. System updates A-share daily data and benchmark index data.
+3. System filters unsuitable stocks.
+4. System calculates factors, scores, conflicts, and candidate labels.
+5. System outputs Top 10 and Top 20 candidate lists.
+6. System generates a daily markdown/html report.
 
-### 5.1 Find A Stock Opportunity
+### 5.2 Review A Candidate
+
+1. User opens the daily report.
+2. User reviews candidate label, composite score, and factor breakdown.
+3. User checks why the stock ranked highly.
+4. User reviews risk counter-evidence and signal conflicts.
+5. User checks invalidation conditions and follow-up indicators.
+6. User decides whether to manually track the stock.
+
+### 5.3 Validate The Logic
+
+1. User runs a walk-forward backtest.
+2. System forms historical Top 10 and Top 20 portfolios without future data.
+3. System compares results against CSI 300, CSI 500, and ChiNext Index.
+4. System outputs return, Alpha, Sharpe, max drawdown, win rate, turnover, and post-cost return.
+5. User uses the backtest report to judge whether the recommendation logic deserves trust.
+
+## 5A. Future User Journeys
+
+### 5A.1 Find A Stock Opportunity In Dashboard
 
 1. User opens the market overview.
 2. User sees sectors, themes, unusual movers, and recommendation buckets.
@@ -90,7 +155,7 @@ Needs to manage data quality, recommendation rules, analyst overrides, model ver
 5. User reviews price action, fundamentals, valuation, events, and risks.
 6. User adds the stock to a watchlist or portfolio.
 
-### 5.2 Validate A Recommendation
+### 5A.2 Validate A Recommendation In Dashboard
 
 1. User opens a recommended stock.
 2. User sees rating, horizon, target range, confidence, and invalidation condition.
@@ -99,7 +164,7 @@ Needs to manage data quality, recommendation rules, analyst overrides, model ver
 5. User checks source links and update times.
 6. User accepts, watches, overrides, or rejects the thesis.
 
-### 5.3 Monitor Thesis Change
+### 5A.3 Monitor Thesis Change
 
 1. A filing, news item, price event, or financial update arrives.
 2. The system maps the event to affected stocks and sectors.
@@ -107,14 +172,16 @@ Needs to manage data quality, recommendation rules, analyst overrides, model ver
 4. User receives an alert.
 5. User can see exactly which data changed and why the thesis changed.
 
-### 5.4 Review Portfolio Risk
+### 5A.4 Review Portfolio Risk
 
 1. User creates or imports holdings.
 2. System calculates position, sector, theme, and factor exposure.
 3. User sees concentration, volatility, drawdown, and correlation risk.
 4. Recommendations are adjusted or flagged if they increase hidden exposure.
 
-## 6. Product Screens
+## 6. Future Product Screens
+
+Product screens are Phase 2+ work. Phase 1 outputs markdown/html reports and data artifacts.
 
 ### 6.1 Market Overview
 
@@ -133,11 +200,10 @@ Must show:
 
 Must show:
 
-- Short-term buy candidates.
-- Long-term buy candidates.
-- Watchlist candidates.
-- Hold names.
-- Reduce/sell/avoid names.
+- Candidate关注 list.
+- 重点观察 list.
+- 观察 list.
+- 风险过高 list.
 - Filters for sector, risk, valuation, momentum, confidence, and horizon.
 - Clear recommendation timestamp and model version.
 
@@ -197,22 +263,20 @@ Must show:
 
 | Label | Meaning |
 | --- | --- |
-| Strong Buy | Strong upside, clear catalyst, acceptable risk, high evidence alignment |
-| Buy | Positive risk/reward with manageable uncertainty |
-| Watch | Interesting but confirmation is missing |
-| Hold | No decisive edge or fairly valued |
-| Reduce | Upside limited or risk rising |
-| Sell/Avoid | Broken thesis, severe risk, or negative event cluster |
+| 候选关注 | Data-backed candidate worth reviewing after market close |
+| 重点观察 | Stronger candidate, but still not deterministic buy advice |
+| 观察 | Interesting but confirmation is missing or signal quality is mixed |
+| 风险过高 | Risk, data quality, liquidity, or signal conflict is too high |
 
 ### 7.2 Required Recommendation Fields
 
 Every recommendation must include:
 
 - Ticker and company name.
-- Rating.
+- Candidate label.
 - Time horizon.
 - Confidence score.
-- Target scenario range.
+- Scenario range when available.
 - Entry or observation condition.
 - Stop-loss or invalidation condition.
 - Key positive evidence.
@@ -221,6 +285,7 @@ Every recommendation must include:
 - Source data timestamps.
 - Recommendation update time.
 - Model or rule version.
+- Data source, data date, update time, and uncertainty.
 
 ### 7.3 Scoring Dimensions
 
@@ -333,14 +398,15 @@ No model should be promoted without:
 - API keys and vendor credentials must not be stored in frontend code.
 - Audit logs required for recommendation changes.
 
-### 10.4 Compliance
+### 10.4 Personal-Use Boundary
 
 - Show risk disclosure.
 - Show recommendation timestamp.
 - Show source trail.
 - Distinguish facts, interpretation, and forecasts.
 - Store recommendation history.
-- Support analyst override logs.
+- Avoid deterministic public buy/sell language.
+- Keep output for personal research unless the product scope changes later.
 
 ### 10.5 Language And Localization
 
@@ -351,83 +417,82 @@ No model should be promoted without:
 - Financial metric IDs, ticker symbols, exchange codes, source names, and model feature names should remain language-neutral internally.
 - Chinese professional terminology should be clear and consistent, especially for rating labels, valuation, risk, financial statements, and model confidence.
 
-## 11. MVP Acceptance Criteria
+## 11. Phase 1 Acceptance Criteria
 
-The MVP is acceptable when:
+Phase 1 is acceptable when:
 
-- A user can search for a mainland China A-share stock.
-- The stock detail page shows price, chart, fundamentals, valuation, news/events, risk summary, and recommendation.
-- Recommendation output includes rating, horizon, confidence, evidence, risk, invalidation condition, timestamp, and source trail.
-- The recommendation center shows buy, watch, hold, reduce, and sell/avoid buckets.
-- Watchlist alerts can be configured for price or thesis changes.
-- Data freshness is visible on key screens.
-- Admin can see failed or stale data updates.
-- The first scoring engine is explainable.
-- The system does not present forecasts as certainties.
-- The repository contains implementation plan, workflow, and PRD documents.
-- The product can show Chinese UI by default and has a defined path to English switching.
+- The system can fetch the A-share stock list.
+- The system can fetch all-market daily bars.
+- Data can be cached and has an incremental update plan.
+- ST, delisting, suspended, newly listed, low-liquidity, and missing-data stocks can be filtered.
+- Momentum, trend, relative strength, risk, and liquidity factors can be calculated.
+- Top 10 and Top 20 candidate lists can be generated.
+- Each candidate has composite score, factor breakdown, reason, risk warning, source, data date, and update time.
+- Daily markdown/html recommendation reports can be generated.
+- Single-stock analysis reports can be generated.
+- Walk-forward backtests can compare against CSI 300, CSI 500, and ChiNext Index.
+- Output language avoids deterministic buy/sell advice.
 
 ## 12. Milestones
 
-### Milestone 1: Product Foundation
+### Milestone 1: Phase 1 Research Pipeline
 
-- Finalize PRD.
-- Decide initial data providers.
-- Create architecture design.
-- Create frontend/backend scaffolding.
+- A-share universe and daily bars.
+- Filters.
+- Factors.
+- Scoring.
+- Explanations.
+- Reports.
+- Walk-forward backtests.
 
-### Milestone 2: MVP UI With Mock Data
+### Milestone 2: Simple Dashboard
 
-- Build market overview.
-- Build recommendation center.
-- Build stock detail page.
-- Build watchlist.
-- Build professional layout and navigation.
+- FastAPI.
+- Simple Chinese-first dashboard.
+- Recommendation center.
+- Stock detail page.
+- Index comparison.
+- Data update-time display.
 
-### Milestone 3: Backend And Real Data
+### Milestone 3: Fundamentals And History
 
-- Add FastAPI backend.
-- Add database schema.
-- Add market data ingestion.
-- Add fundamentals ingestion.
-- Add source timestamps and freshness checks.
+- Financial metrics.
+- Valuation metrics.
+- Industry comparison.
+- Recommendation history.
 
-### Milestone 4: Recommendation Engine V1
+### Milestone 4: Events And Thesis Lifecycle
 
-- Add factor scoring.
-- Add risk scoring.
-- Add recommendation labels.
-- Add recommendation history.
-- Add explanation panels.
+- Announcements.
+- News.
+- Policy events.
+- Thesis lifecycle.
+- 7 / 30 / 60 / 90 day review.
 
-### Milestone 5: Events And Reports
+### Milestone 5: Personal Monitoring
 
-- Add filings/report ingestion.
-- Add news/event ingestion.
-- Add event classification.
-- Add thesis-change alerts.
+- Watchlist.
+- Personal holdings.
+- Risk monitoring.
+- Reminders and alerts.
 
-### Milestone 6: Backtesting And Forecasting
+### Milestone 6: Advanced Data And Models
 
-- Add backtesting engine.
-- Add validation reports.
-- Add interpretable forecast model.
-- Add scenario output.
+- Paid/professional data sources.
+- Advanced models.
+- Real-time or near-real-time updates.
+- Deployment hardening.
 
-### Milestone 7: Portfolio And Professional Hardening
+## 13. Resolved MVP Defaults
 
-- Add portfolio tools.
-- Add exposure and concentration risk.
-- Add analyst workflow.
-- Add audit and compliance views.
-
-## 13. Open Questions
-
-- Should the product support simplified Chinese only at launch, or keep the English switch visible from version 1?
-- Which data budget is acceptable for MVP?
-- Should version 1 include only individual A-shares, or also China ETFs and major indices as context pages?
-- Should recommendations be internally approved by an analyst before users see them?
-- Should the first prototype use mock data, delayed data, or a paid data vendor immediately?
+- Phase 1 output language: simplified Chinese first.
+- English switching remains a future-friendly design constraint, not a Phase 1 implementation blocker.
+- MVP data budget: free/open-source first, AKShare and BaoStock priority, Tushare Pro optional.
+- Phase 1 recommendation targets: A-share individual stocks only.
+- Phase 1 benchmark context: CSI 300, CSI 500, ChiNext Index, STAR 50, and later industry indices.
+- ETFs are optional later extensions, not Phase 1 recommendation targets.
+- No analyst approval workflow is needed for personal use.
+- Phase 1 uses daily after-close data, not real-time tick data.
 
 ## 14. Implementation Rule
 

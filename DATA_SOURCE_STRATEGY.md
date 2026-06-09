@@ -1,20 +1,20 @@
-# Data Source Strategy: China A-Share Prototype With Professional Architecture
+# Data Source Strategy: Personal A-Share Daily Research MVP
 
-## Core Decision
+## 1. Core Decision
 
-Version 1 focuses on A-share individual stock analysis.
+Phase 1 focuses on daily after-close A-share individual stock research for personal use.
 
 Market context is allowed, but recommendation targets are restricted:
 
 - Primary analysis target: A-share individual stocks.
 - Core benchmark indices: CSI 300, CSI 500, ChiNext Index, and STAR 50.
 - Background context: industry indices, sector themes, market breadth, turnover, valuation percentile, liquidity, and China-related macro context.
-- Optional extension: China ETFs.
-- Excluded from version 1 recommendations: US stocks, Hong Kong stocks, China ADRs, global equities, futures, options, FX, and commodities.
+- Optional later extension: China ETFs.
+- Excluded from Phase 1 recommendations: US stocks, Hong Kong stocks, China ADRs, global equities, futures, options, FX, commodities, and ETFs.
 
-## Prototype Data Source Strategy
+## 2. Phase 1 Data Source Strategy
 
-The first version should use free or open-source data sources for prototype development, while keeping the architecture compatible with professional data vendors later.
+Phase 1 should use free or open-source data sources for prototype development, while keeping the architecture compatible with professional data vendors later.
 
 Priority:
 
@@ -24,7 +24,9 @@ Priority:
 
 The data source can be inexpensive during the prototype phase, but the architecture must be professional. The application must not be tightly coupled to a single free interface.
 
-## Provider Layer Requirements
+Phase 1 does not integrate Wind, Choice, iFinD, real-time tick feeds, paid news feeds, or institutional data terminals. Those stay in Phase 6.
+
+## 3. Provider Layer Requirements
 
 Data-source calls must live behind a provider layer:
 
@@ -39,14 +41,14 @@ backend/src/stock_analysis/data/providers/
 Rules:
 
 - Do not call AKShare, BaoStock, or Tushare directly from analysis modules.
-- Do not expose provider-specific column names to the frontend.
+- Do not expose provider-specific column names to reports or future frontend code.
 - Do not let recommendation logic depend on vendor response formats.
-- Provider output must be normalized before storage or analysis.
-- A future Wind, Choice, or iFinD adapter should be addable without rewriting analysis logic.
+- Provider output must be normalized before storage, analysis, reporting, or backtesting.
+- Future Wind, Choice, or iFinD adapters should be addable without rewriting analysis logic.
 
-## Unified DataFrame Schema
+## 4. Unified DataFrame Schema
 
-All providers must output this exact DataFrame schema:
+All providers must output this exact market-data DataFrame schema:
 
 | Column | Meaning |
 | --- | --- |
@@ -63,15 +65,17 @@ All providers must output this exact DataFrame schema:
 
 Analysis modules must depend only on this schema.
 
-## Version 1 Data Coverage
+## 5. Phase 1 Data Coverage
 
 Implement first:
 
+- A-share stock universe.
 - A-share individual stock daily bars.
 - CSI 300 index daily bars.
 - CSI 500 index daily bars.
 - ChiNext Index daily bars.
 - STAR 50 index daily bars.
+- Data source, data date, and update time metadata.
 
 Reserve for later:
 
@@ -83,8 +87,9 @@ Reserve for later:
 - Wind provider.
 - Choice provider.
 - iFinD provider.
+- Real-time or near-real-time data.
 
-## Local Cache
+## 6. Local Cache And Incremental Update
 
 Free data interfaces should not be queried repeatedly for the same request.
 
@@ -94,11 +99,12 @@ Requirements:
 - Cache by provider, method, symbol/index code, date range, and adjustment flag.
 - Use a TTL so stale prototype data can be refreshed.
 - Keep cache implementation separate from provider implementation.
+- Add an incremental update path for daily after-close data.
 - Do not treat local cache as the final production storage layer.
 
-The current prototype cache is file-based and intended for development. Production should later use database-backed historical data plus Redis for hot data.
+The current prototype cache is file-based and intended for personal research and development. A database-backed historical store can be added later if Phase 2+ requires it.
 
-## Data Quality Rules
+## 7. Data Quality Rules
 
 Each normalized provider response should be validated for:
 
@@ -108,12 +114,29 @@ Each normalized provider response should be validated for:
 - Non-empty source.
 - Missing values.
 - Sort order.
+- Sufficient history for factor calculation and backtesting.
 
-If minimum data is missing, the recommendation engine should return `数据不足` or `观察`, not a confident buy/sell rating.
+If minimum data is missing, the recommendation engine should return `数据不足` or `观察`, not a confident candidate label and never deterministic buy/sell advice.
 
-## Implementation Status
+## 8. Phase 1 Filter Data Requirements
 
-Implemented in the first data-layer skeleton:
+Phase 1 filters need enough metadata and daily-bar history to:
+
+- filter ST and *ST stocks;
+- filter delisting-board or delisting-risk stocks;
+- filter stocks listed fewer than 180 days;
+- filter long-suspended stocks;
+- filter stocks with low recent 20-day trading amount;
+- handle limit-up and limit-down edge cases;
+- handle adjusted prices;
+- handle missing data;
+- respect the A-share trading calendar.
+
+If a free provider cannot supply one field reliably, the filter should either use a documented fallback or mark the stock as `数据不足`.
+
+## 9. Current Implementation Status
+
+Already implemented:
 
 - `MarketDataProvider` base interface.
 - `AkShareProvider`.
@@ -128,7 +151,9 @@ Implemented in the first data-layer skeleton:
 - Verified AKShare real-data smoke test for A-share `000001` and `CSI300`.
 - Verified BaoStock real-data smoke test for A-share `sz.000001` and `CSI300`.
 
-## Smoke Test Command
+Planned next Phase 1 modules are documented in `PHASE1_TASKS.md`.
+
+## 10. Smoke Test Command
 
 Use the local Windows proxy when running network-backed data checks in this environment:
 
