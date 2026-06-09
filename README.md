@@ -6,6 +6,7 @@ This project is intended to become a professional decision-support terminal for 
 
 ## Current Documents
 
+- `PRD.md`: Product requirements document for the first professional MVP.
 - `plan.md`: Full implementation plan for the professional stock recommendation platform.
 - `PRODUCTION_WORKFLOW.md`: Step-by-step production workflow for building the platform from planning to launch.
 
