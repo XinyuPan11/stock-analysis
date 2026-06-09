@@ -7,12 +7,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = ROOT.parent
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from stock_analysis.analysis.price_analysis import calculate_return_summary
-from stock_analysis.data.cache import FileDataFrameCache
+from stock_analysis.data.cache import LocalCsvCache
 from stock_analysis.data.constants import CORE_INDEX_CODES
 from stock_analysis.data.providers import AkShareProvider, BaoStockProvider, MarketDataProvider, TushareProvider
 from stock_analysis.data.service import MarketDataService
@@ -25,17 +26,16 @@ def main() -> int:
     parser.add_argument("--index-code", choices=sorted(CORE_INDEX_CODES), default="CSI300")
     parser.add_argument("--start-date", default="2024-01-01")
     parser.add_argument("--end-date", default="2024-01-31")
-    parser.add_argument("--cache-dir", default=str(ROOT / ".cache" / "market_data"))
-    parser.add_argument("--cache-ttl-seconds", type=int, default=3600)
+    parser.add_argument("--adjust", choices=["true", "false"], default="true")
+    parser.add_argument("--cache-dir", default=str(REPO_ROOT / "data" / "cache"))
+    parser.add_argument("--include-universe", action="store_true")
     args = parser.parse_args()
 
     provider = _build_provider(args.provider)
-    service = MarketDataService(
-        provider=provider,
-        cache=FileDataFrameCache(cache_dir=args.cache_dir, ttl_seconds=args.cache_ttl_seconds),
-    )
+    service = MarketDataService(provider=provider, cache=LocalCsvCache(cache_dir=args.cache_dir))
 
-    stock_frame = service.get_stock_daily(args.symbol, args.start_date, args.end_date)
+    adjusted = args.adjust.lower() == "true"
+    stock_frame = service.get_stock_daily(args.symbol, args.start_date, args.end_date, adjusted=adjusted)
     index_frame = service.get_index_daily(args.index_code, args.start_date, args.end_date)
 
     result = {
@@ -57,6 +57,14 @@ def main() -> int:
         },
         "cache_dir": str(Path(args.cache_dir).resolve()),
     }
+
+    if args.include_universe:
+        universe = service.get_stock_universe()
+        result["universe"] = {
+            "rows": len(universe),
+            "schema": list(universe.columns),
+            "sample": universe.head(5).to_dict(orient="records"),
+        }
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

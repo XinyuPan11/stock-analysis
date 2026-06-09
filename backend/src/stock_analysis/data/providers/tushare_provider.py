@@ -7,15 +7,11 @@ import pandas as pd
 
 from stock_analysis.data.constants import CORE_INDEX_CODES
 from stock_analysis.data.providers.base import MarketDataProvider
-from stock_analysis.data.schemas import normalize_market_data_frame
+from stock_analysis.data.schemas import normalize_market_data_frame, normalize_stock_universe_frame
 
 
 class TushareProvider(MarketDataProvider):
-    """Tushare Pro provider adapter.
-
-    Tushare is optional in version 1. It should remain behind this adapter so
-    analysis code does not depend on Tushare-specific APIs or field names.
-    """
+    """Optional Tushare Pro provider adapter."""
 
     source = "tushare"
 
@@ -30,6 +26,19 @@ class TushareProvider(MarketDataProvider):
         if not resolved_token:
             raise ValueError("TushareProvider requires a token or TUSHARE_TOKEN environment variable.")
         self.pro = self.ts.pro_api(resolved_token)
+
+    def get_stock_universe(self) -> pd.DataFrame:
+        raw = self.pro.stock_basic(exchange="", list_status="L", fields="ts_code,symbol,name,exchange,list_status")
+        return normalize_stock_universe_frame(
+            raw,
+            source=self.source,
+            column_map={
+                "symbol": "ts_code",
+                "name": "name",
+                "exchange": "exchange",
+                "listing_status": "list_status",
+            },
+        )
 
     def get_stock_daily(self, symbol: str, start_date: str, end_date: str, adjusted: bool = True) -> pd.DataFrame:
         raw = self.pro.daily(
