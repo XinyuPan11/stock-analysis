@@ -43,6 +43,7 @@ def main() -> int:
         ResearchPipelineConfig(
             start_date=start_date,
             end_date=args.end_date,
+            provider=provider.source,
             benchmark=args.benchmark,
             top_n=args.top_n,
             limit=args.limit,

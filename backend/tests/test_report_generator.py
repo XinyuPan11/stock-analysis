@@ -62,6 +62,7 @@ class ReportGeneratorTests(unittest.TestCase):
             result = generate_reports_from_candidates(
                 _candidates(),
                 summary=_summary(),
+                factors=_factors(),
                 explanations=_explanations(),
                 output_dir=temp_dir,
                 as_of_date="2024-01-31",
@@ -72,6 +73,36 @@ class ReportGeneratorTests(unittest.TestCase):
             self.assertTrue(Path(result["daily_html"]).exists())
             self.assertGreaterEqual(len(result["stock_reports"]), 1)
             self.assertTrue(Path(result["stock_reports"][0]["html"]).exists())
+
+    def test_daily_report_uses_real_summary_fields(self) -> None:
+        artifact = generate_daily_report(_candidates(), summary=_summary(), as_of_date="2024-01-31")
+
+        self.assertIn("provider", artifact.markdown)
+        self.assertIn("benchmark", artifact.markdown)
+        self.assertIn("filtered_count", artifact.markdown)
+        self.assertIn("5493", artifact.markdown)
+        self.assertIn("CSI300", artifact.markdown)
+
+    def test_single_stock_report_uses_real_factor_explanations(self) -> None:
+        artifact = generate_stock_report(_candidates().iloc[0], explanations=_explanations())
+
+        self.assertIn("momentum_60d", artifact.markdown)
+        self.assertIn("9.5", artifact.markdown)
+        self.assertNotIn("score_summary", artifact.markdown)
+
+    def test_missing_factor_inputs_surface_report_warnings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = generate_reports_from_candidates(
+                _candidates(),
+                summary=_summary(),
+                output_dir=temp_dir,
+                as_of_date="2024-01-31",
+            )
+            daily_text = Path(result["daily_markdown"]).read_text(encoding="utf-8")
+
+        self.assertTrue(any("missing_factors_input" in warning for warning in result["warnings"]))
+        self.assertTrue(any("missing_factor_explanations_input" in warning for warning in result["warnings"]))
+        self.assertIn("missing_factor_explanations_input", daily_text)
 
     def test_empty_candidates_generate_clear_no_result_report(self) -> None:
         artifact = generate_daily_report(pd.DataFrame(), as_of_date="2024-01-31")
@@ -139,14 +170,38 @@ def _candidates() -> pd.DataFrame:
     )
 
 
-def _summary() -> dict[str, int]:
+def _summary() -> dict[str, object]:
     return {
+        "as_of_date": "2024-01-31",
+        "updated_at": "2024-02-01 08:00:00",
+        "provider": "baostock",
+        "benchmark": "CSI300",
+        "start_date": "2023-01-01",
+        "end_date": "2024-01-31",
         "universe_count": 5493,
+        "filtered_count": 1,
         "attempted_count": 20,
         "successful_factor_count": 19,
         "scored_count": 10,
         "fetch_error_count": 1,
+        "fetch_errors": [],
+        "output_paths": {},
+        "warnings": [],
     }
+
+
+def _factors() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "symbol": "sh.600016",
+                "as_of_date": "2024-01-31",
+                "momentum_20d": 0.1,
+                "momentum_60d": 0.18,
+                "momentum_120d": 0.25,
+            }
+        ]
+    )
 
 
 def _explanations() -> pd.DataFrame:

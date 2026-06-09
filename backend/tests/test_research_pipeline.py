@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -83,9 +84,31 @@ class ResearchPipelineTests(unittest.TestCase):
             result = run_research_pipeline(service, _config(top_n=1, limit=3, output_dir=temp_dir))
 
             self.assertEqual(len(result.candidates), 1)
-            self.assertTrue(Path(result.output_paths["csv"]).exists())
-            self.assertTrue(Path(result.output_paths["json"]).exists())
-            self.assertEqual(result.summary["output_path"], result.output_paths["csv"])
+            self.assertTrue(Path(result.output_paths["candidates_csv"]).exists())
+            self.assertTrue(Path(result.output_paths["candidates_json"]).exists())
+            self.assertEqual(result.summary["output_path"], result.output_paths["candidates_csv"])
+
+    def test_pipeline_outputs_summary_factors_and_factor_explanations_files(self) -> None:
+        service = _service()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = run_research_pipeline(service, _config(top_n=2, limit=3, output_dir=temp_dir))
+
+            for key in [
+                "summary_json",
+                "factors_csv",
+                "factors_json",
+                "factor_explanations_csv",
+                "factor_explanations_json",
+            ]:
+                self.assertTrue(Path(result.output_paths[key]).exists(), key)
+            self.assertFalse(result.factor_frame.empty)
+            self.assertFalse(result.factor_explanations.empty)
+
+            summary = json.loads(Path(result.output_paths["summary_json"]).read_text(encoding="utf-8"))
+            self.assertEqual(summary["as_of_date"], "2024-01-31")
+            self.assertEqual(summary["benchmark"], "CSI300")
+            self.assertEqual(summary["successful_factor_count"], len(result.factor_frame))
+            self.assertEqual(summary["output_paths"]["factor_explanations_json"], result.output_paths["factor_explanations_json"])
 
     def test_empty_universe_returns_clear_empty_result(self) -> None:
         service = FakeResearchService(

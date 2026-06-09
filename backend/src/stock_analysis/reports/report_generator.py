@@ -60,11 +60,13 @@ def generate_daily_report(
     output_dir: str | Path | None = None,
     as_of_date: str | None = None,
     updated_at: str | None = None,
+    input_warnings: list[str] | None = None,
 ) -> ReportArtifact:
     prepared, warnings = _prepare_candidates(candidates)
-    report_date = _resolve_report_date(prepared, as_of_date)
-    update_time = _resolve_update_time(updated_at)
+    warnings.extend(input_warnings or [])
     summary = summary or {}
+    report_date = _resolve_report_date(prepared, as_of_date or _summary_value(summary, "as_of_date"))
+    update_time = _resolve_update_time(updated_at or _summary_value(summary, "updated_at"))
     markdown = _daily_markdown(prepared, summary=summary, as_of_date=report_date, updated_at=update_time, warnings=warnings)
     _assert_no_prohibited_terms(markdown)
     html = markdown_to_html(markdown)
@@ -96,17 +98,25 @@ def generate_reports_from_candidates(
     candidates: pd.DataFrame,
     *,
     summary: dict[str, Any] | None = None,
+    factors: pd.DataFrame | None = None,
     explanations: pd.DataFrame | None = None,
     output_dir: str | Path,
     as_of_date: str | None = None,
     updated_at: str | None = None,
+    input_warnings: list[str] | None = None,
 ) -> dict[str, Any]:
+    report_warnings = list(input_warnings or [])
+    if factors is None:
+        report_warnings.append("missing_factors_input: using candidates only.")
+    if explanations is None:
+        report_warnings.append("missing_factor_explanations_input: single-stock reports use fallback explanation rows.")
     daily = generate_daily_report(
         candidates,
         summary=summary,
         output_dir=output_dir,
         as_of_date=as_of_date,
         updated_at=updated_at,
+        input_warnings=report_warnings,
     )
     prepared, _ = _prepare_candidates(candidates)
     stock_reports = [
@@ -130,6 +140,27 @@ def load_candidates_json(path: str | Path) -> pd.DataFrame:
         payload = payload["candidates"]
     if not isinstance(payload, list):
         raise ValueError("Candidates JSON must contain a list of candidate rows.")
+    return pd.DataFrame(payload)
+
+
+def load_summary_json(path: str | Path) -> dict[str, Any]:
+    payload = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    if isinstance(payload, dict) and "summary" in payload and isinstance(payload["summary"], dict):
+        return payload["summary"]
+    if isinstance(payload, dict):
+        return payload
+    raise ValueError("Summary JSON must contain an object.")
+
+
+def load_frame_json(path: str | Path) -> pd.DataFrame:
+    payload = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    if isinstance(payload, dict):
+        for key in ["factor_explanations", "factors", "candidates"]:
+            if key in payload:
+                payload = payload[key]
+                break
+    if not isinstance(payload, list):
+        raise ValueError("Frame JSON must contain a list of rows.")
     return pd.DataFrame(payload)
 
 
@@ -177,14 +208,17 @@ def _daily_markdown(
     updated_at: str,
     warnings: list[str],
 ) -> str:
-    source = _source_summary(candidates)
+    source = _source_summary(candidates) or str(summary.get("provider", ""))
     lines = [
         f"# A股每日候选研究报告 - {as_of_date}",
         "",
         f"- 数据日期：{as_of_date}",
         f"- 更新时间：{updated_at}",
         f"- 数据来源：{source}",
+        f"- provider：{summary.get('provider', '')}",
+        f"- benchmark：{summary.get('benchmark', '')}",
         f"- universe_count：{summary.get('universe_count', '')}",
+        f"- filtered_count：{summary.get('filtered_count', '')}",
         f"- attempted_count：{summary.get('attempted_count', '')}",
         f"- successful_factor_count：{summary.get('successful_factor_count', '')}",
         f"- scored_count：{summary.get('scored_count', len(candidates))}",
@@ -395,6 +429,13 @@ def _source_summary(candidates: pd.DataFrame) -> str:
     if candidates.empty or "source" not in candidates.columns:
         return ""
     return ";".join(sorted(set(candidates["source"].dropna().astype(str))))
+
+
+def _summary_value(summary: dict[str, Any], key: str) -> str:
+    value = summary.get(key)
+    if value is None or value == "":
+        return ""
+    return str(value)
 
 
 def _resolve_report_date(candidates: pd.DataFrame, as_of_date: str | None) -> str:

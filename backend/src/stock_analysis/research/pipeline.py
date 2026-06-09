@@ -8,8 +8,9 @@ from typing import Protocol
 import pandas as pd
 
 from stock_analysis.research.ashare_filters import FilterConfig, FilterResult, filter_universe
+from stock_analysis.research.factor_explanation import FACTOR_EXPLANATION_COLUMNS, explain_factor_contributions
 from stock_analysis.research.factors import FACTOR_OUTPUT_COLUMNS, calculate_stock_factors
-from stock_analysis.research.recommendation_engine import RECOMMENDATION_OUTPUT_COLUMNS, rank_candidates
+from stock_analysis.research.recommendation_engine import rank_candidates
 
 
 CANDIDATE_OUTPUT_COLUMNS = [
@@ -48,6 +49,7 @@ class MarketDataServiceLike(Protocol):
 class ResearchPipelineConfig:
     start_date: str
     end_date: str
+    provider: str = ""
     benchmark: str = "CSI300"
     top_n: int = 20
     limit: int = 20
@@ -60,6 +62,7 @@ class ResearchPipelineConfig:
 class ResearchPipelineResult:
     candidates: pd.DataFrame
     factor_frame: pd.DataFrame
+    factor_explanations: pd.DataFrame
     filtered_stocks: pd.DataFrame
     fetch_errors: list[dict[str, str]]
     summary: dict[str, object]
@@ -97,9 +100,15 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
     )
 
     factors = _calculate_factors_for_passed(filter_result, all_daily, benchmark_frame, config, fetch_errors)
+    factor_explanations = explain_factor_contributions(factors) if not factors.empty else pd.DataFrame(columns=FACTOR_EXPLANATION_COLUMNS)
     candidates = _rank_and_enrich_candidates(factors, limited_universe, config.top_n)
-    output_paths = _write_outputs(candidates, config.output_dir, config.end_date) if config.output_dir else {}
+    output_paths = (
+        _write_data_outputs(candidates, factors, factor_explanations, config.output_dir, config.end_date)
+        if config.output_dir
+        else {}
+    )
     summary = _summary(
+        config=config,
         universe_count=len(universe),
         filter_result=filter_result,
         attempted_count=len(limited_universe),
@@ -107,10 +116,16 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
         scored_count=len(candidates),
         fetch_errors=fetch_errors,
         output_paths=output_paths,
+        warnings=list(filter_result.warnings),
     )
+    if config.output_dir:
+        output_paths["summary_json"] = _write_summary(summary, config.output_dir, config.end_date)
+        summary["output_paths"] = output_paths
+        summary["output_path"] = output_paths.get("candidates_csv", "")
     return ResearchPipelineResult(
         candidates=candidates,
         factor_frame=factors,
+        factor_explanations=factor_explanations,
         filtered_stocks=filter_result.filtered_stocks,
         fetch_errors=fetch_errors,
         summary=summary,
@@ -166,20 +181,47 @@ def _rank_and_enrich_candidates(factors: pd.DataFrame, universe: pd.DataFrame, t
     return enriched.loc[:, CANDIDATE_OUTPUT_COLUMNS]
 
 
-def _write_outputs(candidates: pd.DataFrame, output_dir: str | Path, as_of_date: str) -> dict[str, str]:
+def _write_data_outputs(
+    candidates: pd.DataFrame,
+    factors: pd.DataFrame,
+    factor_explanations: pd.DataFrame,
+    output_dir: str | Path,
+    as_of_date: str,
+) -> dict[str, str]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     safe_date = pd.Timestamp(as_of_date).strftime("%Y-%m-%d")
-    csv_path = output_path / f"candidates_{safe_date}.csv"
-    json_path = output_path / f"candidates_{safe_date}.json"
-    candidates.to_csv(csv_path, index=False, encoding="utf-8-sig")
-    json_payload = candidates.to_dict(orient="records")
-    json_path.write_text(json.dumps(json_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"csv": str(csv_path.resolve()), "json": str(json_path.resolve())}
+    paths = {
+        "candidates_csv": output_path / f"candidates_{safe_date}.csv",
+        "candidates_json": output_path / f"candidates_{safe_date}.json",
+        "factors_csv": output_path / f"factors_{safe_date}.csv",
+        "factors_json": output_path / f"factors_{safe_date}.json",
+        "factor_explanations_csv": output_path / f"factor_explanations_{safe_date}.csv",
+        "factor_explanations_json": output_path / f"factor_explanations_{safe_date}.json",
+    }
+    _write_frame(candidates, paths["candidates_csv"], paths["candidates_json"])
+    _write_frame(factors, paths["factors_csv"], paths["factors_json"])
+    _write_frame(factor_explanations, paths["factor_explanations_csv"], paths["factor_explanations_json"])
+    return {key: str(path.resolve()) for key, path in paths.items()}
+
+
+def _write_frame(frame: pd.DataFrame, csv_path: Path, json_path: Path) -> None:
+    frame.to_csv(csv_path, index=False, encoding="utf-8-sig")
+    json_path.write_text(json.dumps(frame.to_dict(orient="records"), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _write_summary(summary: dict[str, object], output_dir: str | Path, as_of_date: str) -> str:
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    safe_date = pd.Timestamp(as_of_date).strftime("%Y-%m-%d")
+    summary_path = output_path / f"summary_{safe_date}.json"
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(summary_path.resolve())
 
 
 def _summary(
     *,
+    config: ResearchPipelineConfig,
     universe_count: int,
     filter_result: FilterResult,
     attempted_count: int,
@@ -187,42 +229,62 @@ def _summary(
     scored_count: int,
     fetch_errors: list[dict[str, str]],
     output_paths: dict[str, str],
+    warnings: list[str],
 ) -> dict[str, object]:
-    output_path = output_paths.get("csv") or output_paths.get("json") or ""
+    output_path = output_paths.get("candidates_csv") or output_paths.get("candidates_json") or ""
     return {
+        "as_of_date": pd.Timestamp(config.end_date).strftime("%Y-%m-%d"),
+        "updated_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "provider": config.provider,
+        "benchmark": config.benchmark,
+        "start_date": pd.Timestamp(config.start_date).strftime("%Y-%m-%d"),
+        "end_date": pd.Timestamp(config.end_date).strftime("%Y-%m-%d"),
         "universe_count": int(universe_count),
         "filtered_count": int(filter_result.stats.get("filtered_count", 0)),
         "attempted_count": int(attempted_count),
         "successful_factor_count": int(successful_factor_count),
         "scored_count": int(scored_count),
         "fetch_error_count": int(len(fetch_errors)),
+        "fetch_errors": fetch_errors,
         "output_path": output_path,
         "output_paths": output_paths,
+        "warnings": warnings,
     }
 
 
 def _empty_result(universe_count: int, output_dir: str | Path | None, as_of_date: str) -> ResearchPipelineResult:
     candidates = pd.DataFrame(columns=CANDIDATE_OUTPUT_COLUMNS)
-    output_paths = _write_outputs(candidates, output_dir, as_of_date) if output_dir else {}
+    factors = pd.DataFrame(columns=FACTOR_OUTPUT_COLUMNS)
+    explanations = pd.DataFrame(columns=FACTOR_EXPLANATION_COLUMNS)
+    empty_config = ResearchPipelineConfig(start_date=as_of_date, end_date=as_of_date)
+    output_paths = _write_data_outputs(candidates, factors, explanations, output_dir, as_of_date) if output_dir else {}
     empty_filter = FilterResult(
         passed_universe=pd.DataFrame(),
         filtered_stocks=pd.DataFrame(),
         stats={"filtered_count": 0},
     )
+    summary = _summary(
+        config=empty_config,
+        universe_count=universe_count,
+        filter_result=empty_filter,
+        attempted_count=0,
+        successful_factor_count=0,
+        scored_count=0,
+        fetch_errors=[],
+        output_paths=output_paths,
+        warnings=[],
+    )
+    if output_dir:
+        output_paths["summary_json"] = _write_summary(summary, output_dir, as_of_date)
+        summary["output_paths"] = output_paths
+        summary["output_path"] = output_paths.get("candidates_csv", "")
     return ResearchPipelineResult(
         candidates=candidates,
-        factor_frame=pd.DataFrame(columns=FACTOR_OUTPUT_COLUMNS),
+        factor_frame=factors,
+        factor_explanations=explanations,
         filtered_stocks=pd.DataFrame(),
         fetch_errors=[],
-        summary=_summary(
-            universe_count=universe_count,
-            filter_result=empty_filter,
-            attempted_count=0,
-            successful_factor_count=0,
-            scored_count=0,
-            fetch_errors=[],
-            output_paths=output_paths,
-        ),
+        summary=summary,
         output_paths=output_paths,
     )
 
