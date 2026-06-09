@@ -36,6 +36,7 @@ COMPONENT_OUTPUT_COLUMNS = [
     "explanation",
 ]
 
+LABEL_HIGH_CONFIDENCE = "\u9ad8\u7f6e\u4fe1\u5019\u9009"
 LABEL_CANDIDATE = "\u5019\u9009\u5173\u6ce8"
 LABEL_FOCUS = "\u91cd\u70b9\u89c2\u5bdf"
 LABEL_WATCH = "\u89c2\u5bdf"
@@ -49,9 +50,11 @@ class ScoringConfig:
     high_risk_volatility_60d: float = 0.05
     high_risk_drawdown_60d: float = 0.25
     severe_risk_drawdown: float = 0.4
+    high_confidence_threshold: float = 88.0
     candidate_threshold: float = 80.0
     focus_threshold: float = 65.0
     watch_threshold: float = 50.0
+    min_high_confidence_risk_score: float = 10.0
     min_candidate_risk_score: float = 8.0
 
 
@@ -95,8 +98,8 @@ def score_factors(factor_df: pd.DataFrame, *, config: ScoringConfig | None = Non
         score_row["risk_flags"] = ";".join(risk_flags)
         score_row["confidence"] = round(confidence, 3)
         score_row["label"] = _label(score_row, risk_flags=risk_flags, data_flags=data_flags, config=resolved_config)
-        score_row["positive_evidence"] = _positive_evidence(row, score_row)
-        score_row["negative_evidence"] = _negative_evidence(row, score_row, risk_flags=risk_flags, data_flags=data_flags)
+        score_row["positive_evidence"] = _positive_evidence(score_row)
+        score_row["negative_evidence"] = _negative_evidence(score_row, risk_flags=risk_flags, data_flags=data_flags)
         rows.append({column: score_row.get(column) for column in SCORE_OUTPUT_COLUMNS})
 
     return pd.DataFrame(rows, columns=SCORE_OUTPUT_COLUMNS).sort_values(
@@ -109,7 +112,6 @@ def calculate_score_components(factor_df: pd.DataFrame) -> pd.DataFrame:
 
     frame = _prepare_factor_frame(factor_df)
     rows: list[dict[str, object]] = []
-
     percentile_columns = {
         "momentum_20d": _percentile(frame["momentum_20d"]),
         "momentum_60d": _percentile(frame["momentum_60d"]),
@@ -342,6 +344,14 @@ def _label(
         return LABEL_HIGH_RISK
     if data_flags and confidence < 0.7:
         return LABEL_INSUFFICIENT_DATA
+    if (
+        total >= config.high_confidence_threshold
+        and confidence >= 0.75
+        and risk_score >= config.min_high_confidence_risk_score
+        and not risk_flags
+        and not data_flags
+    ):
+        return LABEL_HIGH_CONFIDENCE
     if total >= config.candidate_threshold and risk_score >= config.min_candidate_risk_score:
         return LABEL_CANDIDATE
     if total >= config.focus_threshold:
@@ -353,7 +363,7 @@ def _label(
     return LABEL_WATCH
 
 
-def _positive_evidence(factor_row: pd.Series, score_row: dict[str, object]) -> str:
+def _positive_evidence(score_row: dict[str, object]) -> str:
     evidence: list[str] = []
     if float(score_row["momentum_score"]) >= 18:
         evidence.append("\u52a8\u91cf\u5206\u4f4d\u9760\u524d")
@@ -367,11 +377,10 @@ def _positive_evidence(factor_row: pd.Series, score_row: dict[str, object]) -> s
         evidence.append("\u8fd1\u671f\u6d41\u52a8\u6027\u8f83\u597d")
     if not evidence and float(score_row["total_score"]) >= 50:
         evidence.append("\u7efc\u5408\u56e0\u5b50\u5904\u4e8e\u53ef\u89c2\u5bdf\u533a\u95f4")
-    return "；".join(evidence)
+    return "\uff1b".join(evidence)
 
 
 def _negative_evidence(
-    factor_row: pd.Series,
     score_row: dict[str, object],
     *,
     risk_flags: list[str],
@@ -392,7 +401,7 @@ def _negative_evidence(
         evidence.append("\u6570\u636e\u5b8c\u6574\u6027\u4e0d\u8db3")
     if risk_flags:
         evidence.append("\u5b58\u5728\u98ce\u9669\u6807\u8bb0: " + ",".join(risk_flags))
-    return "；".join(evidence)
+    return "\uff1b".join(evidence)
 
 
 def _warning_set(value: object) -> set[str]:

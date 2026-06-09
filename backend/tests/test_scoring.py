@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from stock_analysis.research.scoring import (
     LABEL_CANDIDATE,
+    LABEL_HIGH_CONFIDENCE,
     LABEL_HIGH_RISK,
     LABEL_INSUFFICIENT_DATA,
     SCORE_OUTPUT_COLUMNS,
@@ -63,7 +64,16 @@ class ScoringTests(unittest.TestCase):
 
         self.assertAlmostEqual(row["total_score"], expected)
         self.assertEqual(row["total_score"], 100.0)
-        self.assertEqual(row["label"], LABEL_CANDIDATE)
+        self.assertEqual(row["label"], LABEL_HIGH_CONFIDENCE)
+
+    def test_high_confidence_label_requires_strong_score_and_clean_risk(self) -> None:
+        scored = score_factors(_factor_frame())
+        row = _row(scored, "AAA")
+
+        self.assertEqual(row["label"], LABEL_HIGH_CONFIDENCE)
+        self.assertGreaterEqual(row["total_score"], 88.0)
+        self.assertGreaterEqual(row["confidence"], 0.75)
+        self.assertEqual(row["risk_flags"], "")
 
     def test_insufficient_data_lowers_confidence_and_sets_label(self) -> None:
         rows = _factor_frame().to_dict(orient="records")
@@ -80,6 +90,7 @@ class ScoringTests(unittest.TestCase):
 
         self.assertEqual(row["label"], LABEL_HIGH_RISK)
         self.assertNotEqual(row["label"], LABEL_CANDIDATE)
+        self.assertNotEqual(row["label"], LABEL_HIGH_CONFIDENCE)
 
     def test_score_output_schema_is_stable(self) -> None:
         scored = score_factors(_factor_frame())

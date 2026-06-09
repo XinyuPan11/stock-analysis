@@ -18,10 +18,12 @@ Do not design Phase 1 around:
 
 Allowed labels:
 
-- `候选关注`
-- `重点观察`
-- `观察`
-- `风险过高`
+- `高置信候选`: highest research priority in the current candidate pool; not a trading conclusion.
+- `候选关注`: formal candidate for further research.
+- `重点观察`: has clear strengths but still needs confirmation.
+- `观察`: ordinary tracking, not a core current candidate.
+- `风险过高`: risk is too high for the current candidate pool.
+- `数据不足`: data history or key fields are insufficient for reliable judgment.
 
 Avoid deterministic trading advice such as:
 

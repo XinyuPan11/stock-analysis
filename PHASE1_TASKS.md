@@ -224,3 +224,14 @@ Phase 1 is not complete unless:
 - Backtest report can be generated.
 - Every output includes source, data date, update time, and risk warning.
 - No output uses deterministic buy/sell advice wording.
+
+## 5. Current Research Label Levels
+
+The authoritative Phase 1 research labels are:
+
+- `高置信候选`: multiple signals confirm each other and the stock has the highest current research priority. This is not a trading conclusion.
+- `候选关注`: the stock enters the formal candidate pool and deserves further research.
+- `重点观察`: the stock has visible strengths, but some signals still need confirmation.
+- `观察`: ordinary tracking, not a core current candidate.
+- `风险过高`: risk is too high for the current candidate pool.
+- `数据不足`: history or key fields are insufficient for reliable judgment.
