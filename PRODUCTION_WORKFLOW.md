@@ -23,7 +23,8 @@ Before writing application code, define what the system is legally and professio
 - Initial product type: professional decision-support platform, not an unqualified public financial adviser.
 - Recommendation wording: use evidence-backed ratings and risk scenarios instead of unsupported promises.
 - User target: advanced investors, analysts, and professional users.
-- Initial market: choose one first, then expand. Recommended first choice is US stocks or A-shares, depending on data availability and target users.
+- Initial market: mainland China A-shares only, covering Shanghai Stock Exchange, Shenzhen Stock Exchange, and Beijing Stock Exchange.
+- Excluded markets: US stocks, Hong Kong stocks, China ADRs, and global equities.
 - Compliance baseline: show risk disclosure, recommendation timestamp, source trail, and model limitation notice.
 
 ### Deliverables
@@ -397,7 +398,7 @@ Investment-related software needs strong accountability.
 
 1. Put `plan.md` and this workflow into GitHub.
 2. Create a formal PRD from the plan.
-3. Decide first market: US stocks, A-shares, or Hong Kong stocks.
+3. Define the A-share universe, including supported exchanges, stock boards, industry classifications, and index context.
 4. Choose MVP data source.
 5. Scaffold the frontend/backend project.
 6. Build the first stock detail page with mocked or delayed data.

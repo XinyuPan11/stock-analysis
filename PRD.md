@@ -10,15 +10,16 @@ The product is not a simple stock-tip website. Every recommendation must be supp
 
 | Area | Decision |
 | --- | --- |
-| First market | US equities |
-| Reason | Public filings and company financial data are easier to source through SEC/EDGAR, and US market data has many vendor options |
+| First market | Mainland China A-shares: Shanghai Stock Exchange, Shenzhen Stock Exchange, and Beijing Stock Exchange |
+| Reason | The product will focus only on the Chinese stock market; A-shares provide the core universe for China-focused equity research, policy analysis, sector rotation, and domestic capital-market monitoring |
 | First user type | Professional or advanced research user |
 | Product type | Decision-support research terminal |
 | Recommendation style | Evidence-backed ratings, scenario ranges, risk warnings, and thesis status |
 | Real-time target | Near-real-time where licensed data is available; delayed or cached data is acceptable for the first prototype if freshness is clearly shown |
+| Product language | Chinese-first UI with optional Chinese/English switching |
 | Public advice boundary | The platform must include risk disclosures and should not launch public investment advice without legal review |
 
-Future markets can include A-shares, Hong Kong stocks, ETFs, indices, commodities, FX, rates, and macro dashboards after the first market works reliably.
+The recommendation universe is limited to mainland China stocks. Hong Kong stocks, US stocks, China ADRs, and global equities are excluded unless the product scope is explicitly changed later. China-related indices, ETFs, rates, FX, commodities, and macro data can be used as context, but not as primary recommendation targets in version 1.
 
 ## 3. Target Users
 
@@ -57,6 +58,8 @@ Needs to manage data quality, recommendation rules, analyst overrides, model ver
 - Recommendation history.
 - Manual analyst notes.
 - Initial rule-based scoring engine.
+- Chinese-first user interface.
+- Internationalization foundation for Chinese/English switching.
 
 ### 4.2 Out Of Scope For Version 1
 
@@ -67,6 +70,8 @@ Needs to manage data quality, recommendation rules, analyst overrides, model ver
 - Guaranteed real-time tick feed.
 - Complex deep learning model as the first production model.
 - Multi-market global coverage on day one.
+- US stocks, Hong Kong stocks, China ADRs, or global equity recommendations.
+- Hard-coded single-language UI strings.
 
 ## 5. Core User Journeys
 
@@ -262,7 +267,7 @@ Each thesis must have one status:
 For the first version:
 
 - Use one market data vendor or a clearly labeled delayed data source.
-- Use public filing sources for US company reports where possible.
+- Use China-focused disclosure sources such as exchange announcements, company reports, official disclosure platforms, and licensed market-data vendors where access permits.
 - Use a configurable provider interface so vendors can be replaced later.
 - Do not depend on a single fragile scraping source for production.
 
@@ -331,11 +336,20 @@ No model should be promoted without:
 - Store recommendation history.
 - Support analyst override logs.
 
+### 10.5 Language And Localization
+
+- The default website output language should be Chinese.
+- The system should support a Chinese/English language switch.
+- User-facing UI strings must not be hard-coded inside components.
+- Recommendation explanations, risk warnings, alert text, empty states, and data quality messages should support `zh-CN` and `en-US`.
+- Financial metric IDs, ticker symbols, exchange codes, source names, and model feature names should remain language-neutral internally.
+- Chinese professional terminology should be clear and consistent, especially for rating labels, valuation, risk, financial statements, and model confidence.
+
 ## 11. MVP Acceptance Criteria
 
 The MVP is acceptable when:
 
-- A user can search for a US stock.
+- A user can search for a mainland China A-share stock.
 - The stock detail page shows price, chart, fundamentals, valuation, news/events, risk summary, and recommendation.
 - Recommendation output includes rating, horizon, confidence, evidence, risk, invalidation condition, timestamp, and source trail.
 - The recommendation center shows buy, watch, hold, reduce, and sell/avoid buckets.
@@ -345,6 +359,7 @@ The MVP is acceptable when:
 - The first scoring engine is explainable.
 - The system does not present forecasts as certainties.
 - The repository contains implementation plan, workflow, and PRD documents.
+- The product can show Chinese UI by default and has a defined path to English switching.
 
 ## 12. Milestones
 
@@ -402,9 +417,9 @@ The MVP is acceptable when:
 
 ## 13. Open Questions
 
-- Should the product support Chinese users first, English users first, or bilingual UI?
+- Should the product support simplified Chinese only at launch, or keep the English switch visible from version 1?
 - Which data budget is acceptable for MVP?
-- Should version 1 prioritize US stocks only, or include A-shares watch-only pages?
+- Should version 1 include only individual A-shares, or also China ETFs and major indices as context pages?
 - Should recommendations be internally approved by an analyst before users see them?
 - Should the first prototype use mock data, delayed data, or a paid data vendor immediately?
 
