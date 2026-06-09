@@ -23,8 +23,14 @@ STOCK_UNIVERSE_COLUMNS = [
     "name",
     "exchange",
     "listing_status",
+    "listing_date",
+    "delisting_date",
+    "is_st",
     "source",
 ]
+
+REQUIRED_STOCK_UNIVERSE_COLUMNS = ["symbol", "name", "exchange", "listing_status", "source"]
+OPTIONAL_STOCK_UNIVERSE_COLUMNS = ["listing_date", "delisting_date", "is_st"]
 
 NUMERIC_MARKET_COLUMNS = ["open", "high", "low", "close", "volume", "amount", "adj_close"]
 
@@ -95,6 +101,9 @@ def normalize_stock_universe_frame(
         if target_column == "listing_status" and target_column not in column_map:
             normalized[target_column] = [default_listing_status] * len(raw)
             continue
+        if target_column in OPTIONAL_STOCK_UNIVERSE_COLUMNS and target_column not in column_map:
+            normalized[target_column] = [""] * len(raw)
+            continue
 
         provider_column = column_map.get(target_column)
         if provider_column in raw.columns:
@@ -109,15 +118,25 @@ def normalize_stock_universe_frame(
 
 def validate_stock_universe_frame(frame: pd.DataFrame) -> pd.DataFrame:
     """Validate and order the internal A-share universe schema."""
-    missing = [column for column in STOCK_UNIVERSE_COLUMNS if column not in frame.columns]
+    missing = [column for column in REQUIRED_STOCK_UNIVERSE_COLUMNS if column not in frame.columns]
     if missing:
         raise ValueError(f"Stock universe frame missing required columns: {missing}")
 
-    ordered = frame.loc[:, STOCK_UNIVERSE_COLUMNS].copy()
+    complete = frame.copy()
+    for column in OPTIONAL_STOCK_UNIVERSE_COLUMNS:
+        if column not in complete.columns:
+            complete[column] = ""
+
+    ordered = complete.loc[:, STOCK_UNIVERSE_COLUMNS].copy()
     for column in STOCK_UNIVERSE_COLUMNS:
         ordered[column] = ordered[column].astype(str).str.strip()
+    for column in OPTIONAL_STOCK_UNIVERSE_COLUMNS:
+        ordered[column] = ordered[column].where(~ordered[column].str.lower().isin({"none", "nan", "nat"}), "")
 
-    if ordered[["symbol", "name", "exchange", "listing_status", "source"]].replace("", pd.NA).isna().any().any():
+    missing_required = ordered[REQUIRED_STOCK_UNIVERSE_COLUMNS].apply(
+        lambda column: column.str.lower().isin({"", "none", "nan", "nat"})
+    )
+    if missing_required.any().any():
         raise ValueError("Stock universe contains empty required values.")
 
     return ordered.drop_duplicates(["symbol"]).sort_values("symbol").reset_index(drop=True)
