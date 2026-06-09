@@ -11,8 +11,17 @@ The product scope is focused on the Chinese stock market. Version 1 should cover
 - `PRD.md`: Product requirements document for the first professional MVP.
 - `TECHNICAL_ARCHITECTURE.md`: Technical architecture for frontend, backend, data, recommendations, models, alerts, and bilingual output.
 - `DATA_SOURCE_STRATEGY.md`: Prototype data-source strategy for China A-share data with professional provider abstraction.
+- `SMOKE_TESTS.md`: Recorded verification results for the real-data provider smoke tests.
 - `plan.md`: Full implementation plan for the professional stock recommendation platform.
 - `PRODUCTION_WORKFLOW.md`: Step-by-step production workflow for building the platform from planning to launch.
+
+## First Data Smoke Test
+
+```powershell
+$env:HTTP_PROXY="http://127.0.0.1:8668"
+$env:HTTPS_PROXY="http://127.0.0.1:8668"
+python backend/scripts/smoke_market_data.py --provider akshare --symbol 000001 --index-code CSI300 --start-date 2024-01-01 --end-date 2024-01-31
+```
 
 ## Initial Direction
 

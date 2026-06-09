@@ -27,9 +27,22 @@ class BaoStockProvider(MarketDataProvider):
 
     def get_index_daily(self, index_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         provider_code = CORE_INDEX_CODES.get(index_code, {}).get("baostock", index_code)
-        return self._query_daily(symbol=provider_code, start_date=start_date, end_date=end_date, adjusted=False)
+        return self._query_daily(
+            symbol=provider_code,
+            start_date=start_date,
+            end_date=end_date,
+            adjusted=False,
+            output_symbol=index_code,
+        )
 
-    def _query_daily(self, symbol: str, start_date: str, end_date: str, adjusted: bool) -> pd.DataFrame:
+    def _query_daily(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        adjusted: bool,
+        output_symbol: str | None = None,
+    ) -> pd.DataFrame:
         login = self.bs.login()
         if getattr(login, "error_code", "0") != "0":
             raise RuntimeError(f"BaoStock login failed: {getattr(login, 'error_msg', '')}")
@@ -55,7 +68,7 @@ class BaoStockProvider(MarketDataProvider):
         return normalize_market_data_frame(
             raw,
             source=self.source,
-            symbol=symbol,
+            symbol=output_symbol or symbol,
             column_map={
                 "trade_date": "date",
                 "open": "open",

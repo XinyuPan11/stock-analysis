@@ -124,3 +124,23 @@ Implemented in the first data-layer skeleton:
 - `MarketDataService` as the provider-independent access layer.
 - Example analysis module that depends only on the unified schema.
 - Unit tests for schema normalization, cache behavior, and provider-independent analysis.
+- Real-data smoke test CLI: `python backend/scripts/smoke_market_data.py --provider akshare --symbol 000001 --index-code CSI300`.
+- Verified AKShare real-data smoke test for A-share `000001` and `CSI300`.
+- Verified BaoStock real-data smoke test for A-share `sz.000001` and `CSI300`.
+
+## Smoke Test Command
+
+Use the local Windows proxy when running network-backed data checks in this environment:
+
+```powershell
+$env:HTTP_PROXY="http://127.0.0.1:8668"
+$env:HTTPS_PROXY="http://127.0.0.1:8668"
+python backend/scripts/smoke_market_data.py --provider akshare --symbol 000001 --index-code CSI300 --start-date 2024-01-01 --end-date 2024-01-31
+```
+
+The command should return JSON containing:
+
+- normalized schema columns;
+- A-share stock row count and return summary;
+- benchmark index row count and return summary;
+- local cache directory path.
