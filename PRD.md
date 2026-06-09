@@ -17,9 +17,13 @@ The product is not a simple stock-tip website. Every recommendation must be supp
 | Recommendation style | Evidence-backed ratings, scenario ranges, risk warnings, and thesis status |
 | Real-time target | Near-real-time where licensed data is available; delayed or cached data is acceptable for the first prototype if freshness is clearly shown |
 | Product language | Chinese-first UI with optional Chinese/English switching |
+| Analysis target | A-share individual stocks |
+| Benchmark context | CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices |
+| ETF scope | Optional extension, not a primary version 1 recommendation target |
+| Prototype data strategy | Use AKShare and BaoStock first, with Tushare Pro optional; keep provider abstraction ready for Wind, Choice, and iFinD |
 | Public advice boundary | The platform must include risk disclosures and should not launch public investment advice without legal review |
 
-The recommendation universe is limited to mainland China stocks. Hong Kong stocks, US stocks, China ADRs, and global equities are excluded unless the product scope is explicitly changed later. China-related indices, ETFs, rates, FX, commodities, and macro data can be used as context, but not as primary recommendation targets in version 1.
+The recommendation universe is limited to mainland China A-share individual stocks. Hong Kong stocks, US stocks, China ADRs, and global equities are excluded unless the product scope is explicitly changed later. CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices are required benchmark context. China ETFs are optional extensions, not primary recommendation targets in version 1.
 
 ## 3. Target Users
 
@@ -60,6 +64,7 @@ Needs to manage data quality, recommendation rules, analyst overrides, model ver
 - Initial rule-based scoring engine.
 - Chinese-first user interface.
 - Internationalization foundation for Chinese/English switching.
+- Benchmark views for CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices.
 
 ### 4.2 Out Of Scope For Version 1
 
@@ -71,6 +76,7 @@ Needs to manage data quality, recommendation rules, analyst overrides, model ver
 - Complex deep learning model as the first production model.
 - Multi-market global coverage on day one.
 - US stocks, Hong Kong stocks, China ADRs, or global equity recommendations.
+- ETF recommendation workflows.
 - Hard-coded single-language UI strings.
 
 ## 5. Core User Journeys

@@ -1,0 +1,12 @@
+[project]
+name = "stock-analysis-backend"
+version = "0.1.0"
+description = "Backend data layer for a professional China A-share stock analysis platform."
+requires-python = ">=3.10"
+dependencies = [
+  "pandas>=2.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -10,6 +10,7 @@ The product scope is focused on the Chinese stock market. Version 1 should cover
 
 - `PRD.md`: Product requirements document for the first professional MVP.
 - `TECHNICAL_ARCHITECTURE.md`: Technical architecture for frontend, backend, data, recommendations, models, alerts, and bilingual output.
+- `DATA_SOURCE_STRATEGY.md`: Prototype data-source strategy for China A-share data with professional provider abstraction.
 - `plan.md`: Full implementation plan for the professional stock recommendation platform.
 - `PRODUCTION_WORKFLOW.md`: Step-by-step production workflow for building the platform from planning to launch.
 
@@ -19,6 +20,8 @@ The platform should not be a simple "stock tip" website. It should be built as a
 
 - show real supporting data for every recommendation;
 - use Chinese as the default website language, with Chinese/English switching planned from the beginning;
+- analyze A-share individual stocks first, with CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices as background benchmarks;
+- start with AKShare and BaoStock prototype data while preserving a replaceable professional data-provider architecture;
 - separate facts, analyst interpretation, and model forecasts;
 - explain buy, hold, reduce, and sell recommendations;
 - track recommendation history and thesis changes;

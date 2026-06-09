@@ -6,7 +6,7 @@ Build a professional, data-backed stock analysis platform that can grow from a r
 
 The first implementation should optimize for correctness, traceability, and professional usability before complex automation.
 
-The recommendation universe is limited to the Chinese stock market. Version 1 should focus on mainland China A-shares. US stocks, Hong Kong stocks, China ADRs, and global equities should not appear in recommendation lists or stock detail pages unless the product scope is changed later.
+The recommendation universe is limited to the Chinese stock market. Version 1 should focus on mainland China A-share individual stocks. CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices should be used as benchmark context. ETFs are optional extensions. US stocks, Hong Kong stocks, China ADRs, and global equities should not appear in recommendation lists or stock detail pages unless the product scope is changed later.
 
 ## 2. Version 1 Architecture Decisions
 
@@ -19,6 +19,9 @@ The recommendation universe is limited to the Chinese stock market. Version 1 sh
 | Background jobs | Python worker process, scheduled jobs, and queue-based tasks |
 | Market data phase | Provider abstraction with delayed or near-real-time data depending on vendor access |
 | Market scope | Mainland China A-shares only: Shanghai, Shenzhen, and Beijing exchanges |
+| Analysis scope | A-share individual stocks first; CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices as benchmarks |
+| ETF scope | Optional extension only |
+| Prototype data source | AKShare and BaoStock first, Tushare Pro optional |
 | Model phase | Rule-based scoring first, interpretable ML later |
 | Language | Default Chinese UI with `zh-CN` and `en-US` internationalization support |
 | Deployment style | Docker-based local development, cloud-ready services later |
