@@ -118,6 +118,20 @@ class BacktestingTests(unittest.TestCase):
         self.assertEqual(result.summary["fetch_error_count"], 1)
         self.assertEqual(result.fetch_errors[0]["symbol"], "BBB")
 
+    def test_backtest_supports_offset_retry_and_failed_symbols_output(self) -> None:
+        service = _service(failing_symbols={"BBB"})
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = _config(top_n=2, limit=1, offset=1, retry=2)
+            config = replace(config, output_dir=temp_dir, error_output_dir=temp_dir)
+
+            result = run_walk_forward_backtest(service, config)
+
+            self.assertEqual([call[0] for call in service.stock_calls], ["BBB", "BBB", "BBB"])
+            self.assertEqual(result.summary["offset"], 1)
+            self.assertEqual(result.summary["retry"], 2)
+            self.assertEqual(result.fetch_errors[0]["attempts"], "3")
+            self.assertTrue(Path(result.output_paths["failed_symbols_csv"]).exists())
+
     def test_empty_candidates_returns_warning_without_crashing(self) -> None:
         universe = pd.DataFrame([_stock("ST1", "ST Sample")])
         service = FakeBacktestService(universe, {"ST1": _prices("ST1", 1.0)}, _prices("CSI300", 1.0))
@@ -158,6 +172,8 @@ def _config(
     *,
     top_n: int = 2,
     limit: int = 3,
+    offset: int = 0,
+    retry: int = 0,
     transaction_cost_bps: float = 10.0,
 ) -> WalkForwardConfig:
     return WalkForwardConfig(
@@ -168,6 +184,9 @@ def _config(
         top_n=top_n,
         benchmark="CSI300",
         limit=limit,
+        offset=offset,
+        batch_id="unit-batch",
+        retry=retry,
         transaction_cost_bps=transaction_cost_bps,
         provider="unit",
         filter_config=FilterConfig(

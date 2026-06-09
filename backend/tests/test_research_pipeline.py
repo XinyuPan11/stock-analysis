@@ -110,6 +110,21 @@ class ResearchPipelineTests(unittest.TestCase):
             self.assertEqual(summary["successful_factor_count"], len(result.factor_frame))
             self.assertEqual(summary["output_paths"]["factor_explanations_json"], result.output_paths["factor_explanations_json"])
 
+    def test_pipeline_supports_offset_limit_batch_and_retry_error_output(self) -> None:
+        service = _service(failing_symbols={"BBB"})
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = run_research_pipeline(
+                service,
+                _config(top_n=2, limit=1, offset=1, retry=2, output_dir=temp_dir, error_output_dir=temp_dir),
+            )
+
+            self.assertTrue(result.candidates.empty)
+            self.assertEqual(service.stock_calls, ["BBB", "BBB", "BBB"])
+            self.assertEqual(result.summary["offset"], 1)
+            self.assertEqual(result.summary["retry"], 2)
+            self.assertEqual(result.fetch_errors[0]["attempts"], "3")
+            self.assertTrue(Path(result.output_paths["failed_symbols_csv"]).exists())
+
     def test_empty_universe_returns_clear_empty_result(self) -> None:
         service = FakeResearchService(
             pd.DataFrame(columns=["symbol", "name", "exchange", "listing_status", "source"]),
@@ -143,14 +158,25 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertEqual(result.summary["successful_factor_count"], 0)
 
 
-def _config(top_n: int = 2, limit: int = 3, output_dir: str | None = None) -> ResearchPipelineConfig:
+def _config(
+    top_n: int = 2,
+    limit: int = 3,
+    offset: int = 0,
+    retry: int = 0,
+    output_dir: str | None = None,
+    error_output_dir: str | None = None,
+) -> ResearchPipelineConfig:
     return ResearchPipelineConfig(
         start_date="2023-01-01",
         end_date="2024-01-31",
         benchmark="CSI300",
         top_n=top_n,
         limit=limit,
+        offset=offset,
+        batch_id="unit-batch",
+        retry=retry,
         output_dir=output_dir,
+        error_output_dir=error_output_dir,
     )
 
 

@@ -31,8 +31,12 @@ def main() -> int:
     parser.add_argument("--benchmark", choices=["CSI300"], default="CSI300")
     parser.add_argument("--top-n", type=int, default=20)
     parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument("--batch-id", default="")
+    parser.add_argument("--retry", type=int, default=0)
     parser.add_argument("--cache-dir", default=str(REPO_ROOT / "data" / "cache" / "daily-research"))
     parser.add_argument("--output-dir", default=str(REPO_ROOT / "outputs" / "daily"))
+    parser.add_argument("--error-output-dir", default=str(REPO_ROOT / "outputs" / "errors"))
     args = parser.parse_args()
 
     start_date = _resolve_start_date(args.start_date, args.end_date, args.lookback_days, args.lookback_years)
@@ -47,7 +51,11 @@ def main() -> int:
             benchmark=args.benchmark,
             top_n=args.top_n,
             limit=args.limit,
+            offset=args.offset,
+            batch_id=args.batch_id,
+            retry=args.retry,
             output_dir=args.output_dir,
+            error_output_dir=args.error_output_dir,
         ),
     )
 
@@ -59,8 +67,12 @@ def main() -> int:
         "benchmark": args.benchmark,
         "top_n": args.top_n,
         "limit": args.limit,
+        "offset": args.offset,
+        "batch_id": args.batch_id,
+        "retry": args.retry,
         "cache_dir": str(Path(args.cache_dir).resolve()),
         "output_dir": str(Path(args.output_dir).resolve()),
+        "error_output_dir": str(Path(args.error_output_dir).resolve()),
         "summary": result.summary,
         "fetch_errors": result.fetch_errors[:20],
         "candidates": _records(result.candidates),

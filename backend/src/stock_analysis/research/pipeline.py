@@ -53,7 +53,11 @@ class ResearchPipelineConfig:
     benchmark: str = "CSI300"
     top_n: int = 20
     limit: int = 20
+    offset: int = 0
+    batch_id: str = ""
+    retry: int = 0
     output_dir: str | Path | None = None
+    error_output_dir: str | Path | None = None
     adjusted: bool = True
     filter_config: FilterConfig | None = None
 
@@ -74,7 +78,7 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
 
     _validate_config(config)
     universe = service.get_stock_universe()
-    limited_universe = universe.head(config.limit).reset_index(drop=True)
+    limited_universe = _select_universe_batch(universe, config)
     if limited_universe.empty:
         result = _empty_result(universe_count=len(universe), output_dir=config.output_dir, as_of_date=config.end_date)
         return result
@@ -82,12 +86,11 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
     daily_frames: list[pd.DataFrame] = []
     fetch_errors: list[dict[str, str]] = []
     for symbol in limited_universe["symbol"].astype(str).tolist():
-        try:
-            daily_frames.append(
-                service.get_stock_daily(symbol, config.start_date, config.end_date, adjusted=config.adjusted)
-            )
-        except Exception as exc:
-            fetch_errors.append({"symbol": symbol, "stage": "stock_daily", "error": str(exc)})
+        frame, error = _fetch_stock_daily_with_retry(service, symbol, config)
+        if error:
+            fetch_errors.append(error)
+        elif frame is not None:
+            daily_frames.append(frame)
 
     all_daily = pd.concat(daily_frames, ignore_index=True) if daily_frames else pd.DataFrame()
     benchmark_frame = _fetch_benchmark(service, config, fetch_errors)
@@ -118,10 +121,15 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
         output_paths=output_paths,
         warnings=list(filter_result.warnings),
     )
+    if config.error_output_dir and fetch_errors:
+        output_paths["failed_symbols_csv"] = _write_fetch_errors(fetch_errors, config.error_output_dir, config.end_date)
+        summary["output_paths"] = output_paths
     if config.output_dir:
-        output_paths["summary_json"] = _write_summary(summary, config.output_dir, config.end_date)
         summary["output_paths"] = output_paths
         summary["output_path"] = output_paths.get("candidates_csv", "")
+        output_paths["summary_json"] = _write_summary(summary, config.output_dir, config.end_date)
+        summary["output_paths"] = output_paths
+        _write_summary(summary, config.output_dir, config.end_date)
     return ResearchPipelineResult(
         candidates=candidates,
         factor_frame=factors,
@@ -141,8 +149,30 @@ def _fetch_benchmark(
     try:
         return service.get_index_daily(config.benchmark, config.start_date, config.end_date)
     except Exception as exc:
-        fetch_errors.append({"symbol": config.benchmark, "stage": "benchmark_daily", "error": str(exc)})
+        fetch_errors.append({"symbol": config.benchmark, "stage": "benchmark_daily", "error_type": _classify_error(str(exc)), "error": str(exc), "attempts": "1"})
         return pd.DataFrame()
+
+
+def _fetch_stock_daily_with_retry(
+    service: MarketDataServiceLike,
+    symbol: str,
+    config: ResearchPipelineConfig,
+) -> tuple[pd.DataFrame | None, dict[str, str] | None]:
+    attempts = max(1, int(config.retry) + 1)
+    last_error: Exception | None = None
+    for _ in range(attempts):
+        try:
+            return service.get_stock_daily(symbol, config.start_date, config.end_date, adjusted=config.adjusted), None
+        except Exception as exc:
+            last_error = exc
+    error_text = str(last_error) if last_error else "unknown error"
+    return None, {
+        "symbol": symbol,
+        "stage": "stock_daily",
+        "error_type": _classify_error(error_text),
+        "error": error_text,
+        "attempts": str(attempts),
+    }
 
 
 def _calculate_factors_for_passed(
@@ -219,6 +249,15 @@ def _write_summary(summary: dict[str, object], output_dir: str | Path, as_of_dat
     return str(summary_path.resolve())
 
 
+def _write_fetch_errors(fetch_errors: list[dict[str, str]], output_dir: str | Path, as_of_date: str) -> str:
+    path = Path(output_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    safe_date = pd.Timestamp(as_of_date).strftime("%Y-%m-%d")
+    errors_path = path / f"failed_symbols_{safe_date}.csv"
+    pd.DataFrame(fetch_errors).to_csv(errors_path, index=False, encoding="utf-8-sig")
+    return str(errors_path.resolve())
+
+
 def _summary(
     *,
     config: ResearchPipelineConfig,
@@ -239,6 +278,10 @@ def _summary(
         "benchmark": config.benchmark,
         "start_date": pd.Timestamp(config.start_date).strftime("%Y-%m-%d"),
         "end_date": pd.Timestamp(config.end_date).strftime("%Y-%m-%d"),
+        "offset": int(config.offset),
+        "limit": int(config.limit),
+        "batch_id": config.batch_id,
+        "retry": int(config.retry),
         "universe_count": int(universe_count),
         "filtered_count": int(filter_result.stats.get("filtered_count", 0)),
         "attempted_count": int(attempted_count),
@@ -289,11 +332,32 @@ def _empty_result(universe_count: int, output_dir: str | Path | None, as_of_date
     )
 
 
+def _select_universe_batch(universe: pd.DataFrame, config: ResearchPipelineConfig) -> pd.DataFrame:
+    return universe.iloc[config.offset : config.offset + config.limit].reset_index(drop=True)
+
+
+def _classify_error(error: str) -> str:
+    text = str(error).lower()
+    if "numeric market data" in text or "non-numeric" in text:
+        return "non_numeric_market_data"
+    if "empty" in text or "no data" in text:
+        return "empty_data"
+    if "timeout" in text or "timed out" in text:
+        return "timeout"
+    if "connection" in text or "reset" in text or "proxy" in text:
+        return "connection"
+    return "provider_error"
+
+
 def _validate_config(config: ResearchPipelineConfig) -> None:
     if config.top_n <= 0:
         raise ValueError("top_n must be positive.")
     if config.limit <= 0:
         raise ValueError("limit must be positive.")
+    if config.offset < 0:
+        raise ValueError("offset cannot be negative.")
+    if config.retry < 0:
+        raise ValueError("retry cannot be negative.")
     start = pd.to_datetime(config.start_date, errors="coerce")
     end = pd.to_datetime(config.end_date, errors="coerce")
     if pd.isna(start) or pd.isna(end):

@@ -65,9 +65,13 @@ class WalkForwardConfig:
     top_n: int = 10
     benchmark: str = "CSI300"
     limit: int = 50
+    offset: int = 0
+    batch_id: str = ""
+    retry: int = 0
     transaction_cost_bps: float = 10.0
     cache_dir: str | Path | None = None
     output_dir: str | Path | None = None
+    error_output_dir: str | Path | None = None
     provider: str = ""
     adjusted: bool = True
     filter_config: FilterConfig | None = None
@@ -91,18 +95,19 @@ def run_walk_forward_backtest(
 
     _validate_config(config)
     history_start = _history_start(config.start_date, config.lookback_days)
-    universe = service.get_stock_universe().head(config.limit).reset_index(drop=True)
+    full_universe = service.get_stock_universe()
+    universe = full_universe.iloc[config.offset : config.offset + config.limit].reset_index(drop=True)
     fetch_errors: list[dict[str, str]] = []
     skipped_symbols: list[dict[str, str]] = []
 
     benchmark = _fetch_benchmark(service, config, history_start, fetch_errors)
     rebalance_dates = _rebalance_dates(benchmark, config.start_date, config.end_date, config.rebalance_frequency)
     if universe.empty or benchmark.empty or not rebalance_dates:
-        return _empty_result(config, universe_count=len(universe), fetch_errors=fetch_errors, warnings=["empty_universe_or_benchmark"])
+        return _empty_result(config, universe_count=len(full_universe), fetch_errors=fetch_errors, warnings=["empty_universe_or_benchmark"])
 
     all_daily = _fetch_stock_histories(service, universe, history_start, config, fetch_errors)
     if all_daily.empty:
-        return _empty_result(config, universe_count=len(universe), fetch_errors=fetch_errors, warnings=["empty_stock_price_history"])
+        return _empty_result(config, universe_count=len(full_universe), fetch_errors=fetch_errors, warnings=["empty_stock_price_history"])
 
     equity_rows: list[dict[str, object]] = []
     rebalance_rows: list[dict[str, object]] = []
@@ -176,8 +181,13 @@ def run_walk_forward_backtest(
         transaction_cost=total_transaction_cost,
     )
     warnings.extend(metric_warnings)
-    summary = _summary(config, len(universe), metrics, fetch_errors, skipped_symbols, warnings)
+    summary = _summary(config, len(full_universe), metrics, fetch_errors, skipped_symbols, warnings)
     output_paths = _write_outputs(summary, equity_curve, rebalance_log, config) if config.output_dir else {}
+    if config.error_output_dir and fetch_errors:
+        output_paths["failed_symbols_csv"] = _write_fetch_errors(fetch_errors, config.error_output_dir, config.end_date)
+        summary["output_paths"] = output_paths
+        if output_paths.get("summary_json"):
+            Path(output_paths["summary_json"]).write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     if output_paths:
         summary["output_paths"] = output_paths
     return WalkForwardBacktestResult(
@@ -237,14 +247,11 @@ def _fetch_stock_histories(
 ) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     for symbol in universe["symbol"].astype(str).tolist():
-        try:
-            frame = service.get_stock_daily(symbol, history_start, config.end_date, adjusted=config.adjusted)
-            if frame is None or frame.empty:
-                fetch_errors.append({"symbol": symbol, "stage": "stock_daily", "error": "empty price history"})
-                continue
+        frame, error = _fetch_stock_daily_with_retry(service, symbol, history_start, config)
+        if error:
+            fetch_errors.append(error)
+        elif frame is not None:
             frames.append(_safe_market_frame(frame))
-        except Exception as exc:
-            fetch_errors.append({"symbol": symbol, "stage": "stock_daily", "error": str(exc)})
     if not frames:
         return pd.DataFrame(columns=MARKET_DATA_COLUMNS)
     return pd.concat(frames, ignore_index=True).sort_values(["symbol", "trade_date"]).reset_index(drop=True)
@@ -259,8 +266,34 @@ def _fetch_benchmark(
     try:
         return _safe_market_frame(service.get_index_daily(config.benchmark, history_start, config.end_date))
     except Exception as exc:
-        fetch_errors.append({"symbol": config.benchmark, "stage": "benchmark_daily", "error": str(exc)})
+        fetch_errors.append({"symbol": config.benchmark, "stage": "benchmark_daily", "error_type": _classify_error(str(exc)), "error": str(exc), "attempts": "1"})
         return pd.DataFrame(columns=MARKET_DATA_COLUMNS)
+
+
+def _fetch_stock_daily_with_retry(
+    service: BacktestMarketDataServiceLike,
+    symbol: str,
+    history_start: str,
+    config: WalkForwardConfig,
+) -> tuple[pd.DataFrame | None, dict[str, str] | None]:
+    attempts = max(1, int(config.retry) + 1)
+    last_error: Exception | None = None
+    for _ in range(attempts):
+        try:
+            frame = service.get_stock_daily(symbol, history_start, config.end_date, adjusted=config.adjusted)
+            if frame is None or frame.empty:
+                raise ValueError("empty price history")
+            return frame, None
+        except Exception as exc:
+            last_error = exc
+    error_text = str(last_error) if last_error else "unknown error"
+    return None, {
+        "symbol": symbol,
+        "stage": "stock_daily",
+        "error_type": _classify_error(error_text),
+        "error": error_text,
+        "attempts": str(attempts),
+    }
 
 
 def _rebalance_dates(benchmark: pd.DataFrame, start_date: str, end_date: str, frequency: str) -> list[str]:
@@ -403,6 +436,15 @@ def _write_outputs(
     return output_paths
 
 
+def _write_fetch_errors(fetch_errors: list[dict[str, str]], output_dir: str | Path, as_of_date: str) -> str:
+    path = Path(output_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    safe_date = pd.Timestamp(as_of_date).strftime("%Y-%m-%d")
+    errors_path = path / f"failed_symbols_{safe_date}.csv"
+    pd.DataFrame(fetch_errors).to_csv(errors_path, index=False, encoding="utf-8-sig")
+    return str(errors_path.resolve())
+
+
 def _summary(
     config: WalkForwardConfig,
     universe_count: int,
@@ -418,6 +460,10 @@ def _summary(
         "benchmark": config.benchmark,
         "start_date": pd.Timestamp(config.start_date).strftime("%Y-%m-%d"),
         "end_date": pd.Timestamp(config.end_date).strftime("%Y-%m-%d"),
+        "offset": int(config.offset),
+        "limit": int(config.limit),
+        "batch_id": config.batch_id,
+        "retry": int(config.retry),
         "universe_count": int(universe_count),
         "fetch_error_count": int(len(fetch_errors)),
         "skipped_symbol_count": int(len(skipped_symbols)),
@@ -430,6 +476,9 @@ def _summary(
             "top_n": int(config.top_n),
             "benchmark": config.benchmark,
             "limit": int(config.limit),
+            "offset": int(config.offset),
+            "batch_id": config.batch_id,
+            "retry": int(config.retry),
             "transaction_cost_bps": float(config.transaction_cost_bps),
         },
         "metrics": metrics,
@@ -449,6 +498,11 @@ def _empty_result(
     metrics, metric_warnings = calculate_backtest_metrics(equity_curve, rebalance_log, transaction_cost=0.0)
     summary = _summary(config, universe_count, metrics, fetch_errors, [], [*warnings, *metric_warnings])
     output_paths = _write_outputs(summary, equity_curve, rebalance_log, config) if config.output_dir else {}
+    if config.error_output_dir and fetch_errors:
+        output_paths["failed_symbols_csv"] = _write_fetch_errors(fetch_errors, config.error_output_dir, config.end_date)
+        summary["output_paths"] = output_paths
+        if output_paths.get("summary_json"):
+            Path(output_paths["summary_json"]).write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     if output_paths:
         summary["output_paths"] = output_paths
     return WalkForwardBacktestResult(
@@ -493,7 +547,24 @@ def _validate_config(config: WalkForwardConfig) -> None:
         raise ValueError("top_n must be positive.")
     if config.limit <= 0:
         raise ValueError("limit must be positive.")
+    if config.offset < 0:
+        raise ValueError("offset cannot be negative.")
+    if config.retry < 0:
+        raise ValueError("retry cannot be negative.")
     if config.rebalance_frequency not in {"monthly", "weekly"}:
         raise ValueError("rebalance_frequency must be monthly or weekly.")
     if config.transaction_cost_bps < 0:
         raise ValueError("transaction_cost_bps cannot be negative.")
+
+
+def _classify_error(error: str) -> str:
+    text = str(error).lower()
+    if "numeric market data" in text or "non-numeric" in text:
+        return "non_numeric_market_data"
+    if "empty" in text or "no data" in text:
+        return "empty_data"
+    if "timeout" in text or "timed out" in text:
+        return "timeout"
+    if "connection" in text or "reset" in text or "proxy" in text:
+        return "connection"
+    return "provider_error"

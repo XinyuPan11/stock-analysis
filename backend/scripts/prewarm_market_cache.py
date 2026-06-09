@@ -13,72 +13,57 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from stock_analysis.backtesting.walk_forward import WalkForwardConfig, run_walk_forward_backtest
 from stock_analysis.data.cache import LocalCsvCache
+from stock_analysis.data.cache_prewarm import CachePrewarmConfig, load_symbols_file, run_cache_prewarm
 from stock_analysis.data.providers import AkShareProvider, BaoStockProvider, MarketDataProvider, TushareProvider
 from stock_analysis.data.service import MarketDataService
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run a Phase 1 walk-forward A-share Top N backtest.")
+    parser = argparse.ArgumentParser(description="Prewarm local A-share daily market-data cache.")
     parser.add_argument("--provider", choices=["akshare", "baostock", "tushare"], default="baostock")
     parser.add_argument("--start-date", required=True)
     parser.add_argument("--end-date", required=True)
-    parser.add_argument("--lookback-days", type=int, default=120)
-    parser.add_argument("--rebalance-frequency", choices=["monthly", "weekly"], default="monthly")
-    parser.add_argument("--top-n", type=int, default=10)
-    parser.add_argument("--benchmark", choices=["CSI300"], default="CSI300")
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument("--offset", type=int, default=0)
-    parser.add_argument("--batch-id", default="")
+    parser.add_argument("--batch-size", type=int, default=10)
+    parser.add_argument("--cache-dir", default=str(REPO_ROOT / "data" / "cache" / "prewarm"))
+    parser.add_argument("--output-dir", default=str(REPO_ROOT / "outputs" / "cache"))
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--sleep-seconds", type=float, default=0.0)
+    parser.add_argument("--max-errors", type=int, default=None)
     parser.add_argument("--retry", type=int, default=0)
-    parser.add_argument("--cache-dir", default=str(REPO_ROOT / "data" / "cache" / "backtest"))
-    parser.add_argument("--output-dir", default=str(REPO_ROOT / "outputs" / "backtests"))
-    parser.add_argument("--error-output-dir", default=str(REPO_ROOT / "outputs" / "errors"))
-    parser.add_argument("--transaction-cost-bps", type=float, default=10.0)
+    parser.add_argument("--symbols-file", default=None)
     args = parser.parse_args()
 
     provider = _build_provider(args.provider)
-    service = MarketDataService(provider=provider, cache=LocalCsvCache(cache_dir=args.cache_dir))
-    result = run_walk_forward_backtest(
+    cache = LocalCsvCache(cache_dir=args.cache_dir)
+    service = MarketDataService(provider=provider, cache=cache)
+    symbols = load_symbols_file(args.symbols_file) if args.symbols_file else ()
+    result = run_cache_prewarm(
         service,
-        WalkForwardConfig(
+        CachePrewarmConfig(
+            provider=provider.source,
             start_date=args.start_date,
             end_date=args.end_date,
-            lookback_days=args.lookback_days,
-            rebalance_frequency=args.rebalance_frequency,
-            top_n=args.top_n,
-            benchmark=args.benchmark,
             limit=args.limit,
             offset=args.offset,
-            batch_id=args.batch_id,
-            retry=args.retry,
+            batch_size=args.batch_size,
             cache_dir=args.cache_dir,
             output_dir=args.output_dir,
-            error_output_dir=args.error_output_dir,
-            transaction_cost_bps=args.transaction_cost_bps,
-            provider=provider.source,
+            resume=args.resume,
+            sleep_seconds=args.sleep_seconds,
+            max_errors=args.max_errors,
+            retry=args.retry,
+            symbols=symbols,
         ),
     )
 
     payload = {
         "status": "ok",
-        "provider": provider.source,
-        "start_date": args.start_date,
-        "end_date": args.end_date,
-        "benchmark": args.benchmark,
-        "top_n": args.top_n,
-        "limit": args.limit,
-        "offset": args.offset,
-        "batch_id": args.batch_id,
-        "retry": args.retry,
-        "cache_dir": str(Path(args.cache_dir).resolve()),
-        "output_dir": str(Path(args.output_dir).resolve()),
-        "error_output_dir": str(Path(args.error_output_dir).resolve()),
         "summary": result.summary,
+        "errors": result.errors.to_dict(orient="records")[:20],
         "output_paths": result.output_paths,
-        "fetch_errors": result.fetch_errors[:20],
-        "skipped_symbols": result.skipped_symbols[:20],
     }
     print(json.dumps(_clean(payload), ensure_ascii=False, indent=2, allow_nan=False))
     return 0

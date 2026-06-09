@@ -67,6 +67,32 @@ class LocalCsvCache:
         frame.to_csv(path, index=False, encoding="utf-8")
         return frame.copy()
 
+    def market_data_path(self, *, provider: str, dataset: str, symbol: str, adjusted: bool) -> Path:
+        """Return the cache path for a market data request."""
+
+        return self._market_path(provider=provider, dataset=dataset, symbol=symbol, adjusted=adjusted)
+
+    def has_market_data_coverage(
+        self,
+        *,
+        provider: str,
+        dataset: str,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        adjusted: bool,
+    ) -> bool:
+        """Return True when cache coverage fully contains the requested date range."""
+
+        path = self._market_path(provider=provider, dataset=dataset, symbol=symbol, adjusted=adjusted)
+        if not path.exists():
+            return False
+        coverage = self._read_coverage(path.with_suffix(".coverage.json"))
+        if coverage is None:
+            cached = self._read_market(path)
+            return self._missing_ranges(cached, start_date=start_date, end_date=end_date).is_empty
+        return self._missing_ranges(pd.DataFrame(), start_date=start_date, end_date=end_date, coverage=coverage).is_empty
+
     def _market_path(self, *, provider: str, dataset: str, symbol: str, adjusted: bool) -> Path:
         safe_symbol = str(symbol).replace("/", "_").replace("\\", "_").replace(":", "_")
         adjust_key = "adjusted" if adjusted else "raw"
