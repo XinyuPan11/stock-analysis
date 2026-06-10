@@ -1,0 +1,21 @@
+[project]
+name = "stock-analysis-backend"
+version = "0.1.0"
+description = "Backend data layer for a professional China A-share stock analysis platform."
+requires-python = ">=3.10"
+dependencies = [
+  "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+data = [
+  "akshare>=1.18",
+  "baostock>=0.9",
+]
+tushare = [
+  "tushare>=1.4",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

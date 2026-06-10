@@ -23,7 +23,11 @@ Before writing application code, define what the system is legally and professio
 - Initial product type: professional decision-support platform, not an unqualified public financial adviser.
 - Recommendation wording: use evidence-backed ratings and risk scenarios instead of unsupported promises.
 - User target: advanced investors, analysts, and professional users.
-- Initial market: choose one first, then expand. Recommended first choice is US stocks or A-shares, depending on data availability and target users.
+- Initial market: mainland China A-shares only, covering Shanghai Stock Exchange, Shenzhen Stock Exchange, and Beijing Stock Exchange.
+- Excluded markets: US stocks, Hong Kong stocks, China ADRs, and global equities.
+- Analysis priority: A-share individual stocks first.
+- Benchmark context: CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices.
+- ETF scope: optional extension after the core A-share workflow is stable.
 - Compliance baseline: show risk disclosure, recommendation timestamp, source trail, and model limitation notice.
 
 ### Deliverables
@@ -55,11 +59,13 @@ A stock platform is only as good as its data. Real-time, financial, news, and fi
 
 ### Recommended Approach
 
-- Start with one or two data vendors only.
+- Start with free/open-source prototype sources: AKShare and BaoStock first, Tushare Pro optional.
+- Keep provider adapters replaceable so Wind, Choice, and iFinD can be added later.
 - Store original source timestamps.
 - Keep raw data and normalized data separately.
 - Build data freshness checks from day one.
 - Never show a recommendation without the latest successful data update time.
+- Keep analysis modules dependent only on the normalized internal schema, not provider-specific APIs.
 
 ### Deliverables
 
@@ -68,6 +74,7 @@ A stock platform is only as good as its data. Real-time, financial, news, and fi
 - Symbol mapping rules.
 - Market calendar and timezone rules.
 - Data freshness service requirements.
+- Replaceable provider layer for AKShare, BaoStock, optional Tushare Pro, and future Wind/Choice/iFinD adapters.
 
 ### Acceptance Criteria
 
@@ -397,7 +404,7 @@ Investment-related software needs strong accountability.
 
 1. Put `plan.md` and this workflow into GitHub.
 2. Create a formal PRD from the plan.
-3. Decide first market: US stocks, A-shares, or Hong Kong stocks.
+3. Define the A-share universe, including supported exchanges, stock boards, industry classifications, and index context.
 4. Choose MVP data source.
 5. Scaffold the frontend/backend project.
 6. Build the first stock detail page with mocked or delayed data.

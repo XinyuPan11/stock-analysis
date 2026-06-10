@@ -9,12 +9,12 @@ Build a professional-grade stock recommendation and analysis website for advance
 - Important boundary: The product can provide decision-support analysis and model-generated recommendations, but any public-facing investment advice may require legal/compliance review, licensed investment adviser qualifications, risk disclosures, audit logs, and jurisdiction-specific controls.
 
 ## Open Questions
-- Target markets: A-shares, Hong Kong stocks, US stocks, global equities, or a phased rollout?
+- Target market scope: mainland China A-shares only, including Shanghai Stock Exchange, Shenzhen Stock Exchange, and Beijing Stock Exchange.
 - Target users: Internal professional desk, paid professional subscribers, retail investors, or institutional clients?
 - Recommendation style: Pure research support, model scoring, explicit buy/sell calls, or portfolio allocation advice?
-- Data budget: Free/public data, mid-tier APIs, or professional terminals/data vendors such as Wind, Choice, Bloomberg, Refinitiv/LSEG, FactSet, S&P Capital IQ, Nasdaq Data Link, Polygon, IEX Cloud, Tiingo, SEC EDGAR, HKEX, exchange feeds, and local filings sources?
+- Data budget: use free/open-source prototype sources first, prioritizing AKShare and BaoStock with Tushare Pro optional; keep the architecture ready for Wind, Choice, iFinD, exchange feeds, official disclosure platforms, and licensed China market sources.
 - Real-time requirement: Tick-level, second-level, minute-level, or delayed quotes?
-- Compliance scope: China mainland, Hong Kong, US, EU, or multi-jurisdiction?
+- Compliance scope: mainland China-focused product requirements, with legal review before any public investment-advice launch.
 - Asset coverage: Equities only, or also ETFs, indices, sectors, futures, FX, rates, commodities, and macro indicators?
 - Output format: Web dashboard only, or also alerts, PDF research notes, API access, and portfolio monitoring?
 
@@ -31,7 +31,7 @@ The platform should never simply say "buy this stock." It should show the eviden
 ## Core User Workflows
 
 ### 1. Market Overview
-- Real-time indices, sectors, themes, market breadth, turnover, volatility, rates, FX, commodities, and global risk indicators.
+- Real-time China indices, A-share sectors, themes, market breadth, turnover, volatility, RMB rates, FX, commodities, and China-related macro risk indicators.
 - "Today focus" panel: sectors gaining momentum, stocks with abnormal volume, earnings surprises, policy/news catalysts, negative risk events.
 - Heatmaps by sector, theme, valuation percentile, earnings revision, fund flow, and technical strength.
 
@@ -203,7 +203,7 @@ Recommendation labels should be explainable:
 ### Data Sources
 - Market data: quotes, OHLCV, tick/minute bars, indices, sectors, ETF proxies.
 - Fundamentals: annual reports, quarterly reports, financial statements, consensus estimates, dividends, buybacks, corporate actions.
-- Filings and announcements: exchange filings, company announcements, SEC EDGAR for US-listed companies, local disclosure platforms for target markets.
+- Filings and announcements: Shanghai/Shenzhen/Beijing exchange announcements, listed-company reports, official disclosure platforms, and licensed China market data sources.
 - News and events: licensed news APIs, exchange announcements, government policy websites, central banks, regulators, industry associations.
 - Macro: rates, FX, inflation, PMI, employment, credit, commodities, yield curves.
 - Alternative/professional data if budget allows: fund flows, supply chain, web traffic, app ranking, shipping, satellite, options, short interest.
@@ -339,6 +339,7 @@ Recommendation labels should be explainable:
 - User can search a stock and see current quote, historical chart, financial statements, valuation, risks, news/events, and recommendation.
 - Every displayed recommendation includes source-backed evidence and an update timestamp.
 - Data freshness dashboard correctly flags stale market data, stale fundamentals, and failed ingestion jobs.
+- Analysis modules use only the unified market-data schema and do not directly import AKShare, BaoStock, or Tushare.
 - A financial report update changes derived metrics and triggers a recommendation recalculation.
 - A material negative event appears on the affected stock page and updates risk score or alert state.
 - A model recommendation can be traced back to factor values, source data, and model version.
