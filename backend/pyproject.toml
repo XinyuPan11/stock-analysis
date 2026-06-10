@@ -5,6 +5,8 @@ description = "Backend data layer for a professional China A-share stock analysi
 requires-python = ">=3.10"
 dependencies = [
   "pandas>=2.0",
+  "fastapi>=0.100",
+  "uvicorn>=0.20",
 ]
 
 [project.optional-dependencies]
