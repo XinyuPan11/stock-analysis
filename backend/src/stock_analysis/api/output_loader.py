@@ -34,6 +34,26 @@ RESEARCH_LABELS = [
 
 PROHIBITED_TERMS = ["买入", "卖出", "强烈买入", "建议买入"]
 PROHIBITED_REPLACEMENT = "确定性交易表述已隐藏"
+SORTABLE_CANDIDATE_FIELDS = {
+    "rank",
+    "total_score",
+    "confidence",
+    "momentum_score",
+    "trend_score",
+    "relative_strength_score",
+    "risk_score",
+    "liquidity_score",
+}
+
+FACTOR_GROUP_LABELS = {
+    "momentum": "动量",
+    "trend": "趋势",
+    "relative_strength": "相对强度",
+    "risk": "风险",
+    "liquidity": "流动性",
+}
+
+NO_FACTOR_EXPLANATIONS_MESSAGE = "暂无真实因子贡献表，请先生成 factor_explanations 输出。"
 
 
 @dataclass(frozen=True)
@@ -87,7 +107,17 @@ class OutputLoader:
             "files": {key: str(path) for key, path in files.items() if path.exists()},
         }
 
-    def load_candidates(self) -> dict[str, Any]:
+    def load_candidates(
+        self,
+        *,
+        label: str | None = None,
+        min_score: float | None = None,
+        max_score: float | None = None,
+        min_confidence: float | None = None,
+        sort_by: str = "total_score",
+        sort_order: str = "desc",
+        limit: int | None = None,
+    ) -> dict[str, Any]:
         as_of_date = self.latest_daily_date()
         if not as_of_date:
             return self._empty_candidates()
@@ -100,6 +130,39 @@ class OutputLoader:
         rows = rows if isinstance(rows, list) else []
         rows = self._sanitize_payload(rows)
         rows = sorted([row for row in rows if isinstance(row, dict)], key=self._score_sort_key, reverse=True)
+        total_count = len(rows)
+        filters = {
+            "label": label or "",
+            "min_score": min_score,
+            "max_score": max_score,
+            "min_confidence": min_confidence,
+            "sort_by": sort_by,
+            "sort_order": sort_order,
+            "limit": limit,
+        }
+        validation_error = self._candidate_filter_error(sort_by=sort_by, sort_order=sort_order, limit=limit)
+        if validation_error:
+            return {
+                "ok": False,
+                "message": validation_error,
+                "as_of_date": as_of_date,
+                "count": 0,
+                "total_count": total_count,
+                "filters": filters,
+                "items": [],
+                "label_distribution": dict(Counter(str(row.get("label", "")) for row in rows)),
+                "high_confidence": [],
+            }
+        rows = self._filter_candidate_rows(
+            rows,
+            label=label,
+            min_score=min_score,
+            max_score=max_score,
+            min_confidence=min_confidence,
+        )
+        rows = self._sort_candidate_rows(rows, sort_by=sort_by, sort_order=sort_order)
+        if limit is not None:
+            rows = rows[:limit]
         label_distribution = dict(Counter(str(row.get("label", "")) for row in rows))
         high_confidence = [row for row in rows if row.get("label") == RESEARCH_LABELS[0]]
         return {
@@ -107,6 +170,8 @@ class OutputLoader:
             "message": "",
             "as_of_date": as_of_date,
             "count": len(rows),
+            "total_count": total_count,
+            "filters": filters,
             "items": rows,
             "label_distribution": label_distribution,
             "high_confidence": high_confidence,
@@ -134,6 +199,7 @@ class OutputLoader:
                     "symbol": str(row.get("symbol", normalized)),
                     "item": row,
                     "factor_explanations": self.get_factor_explanations_by_symbol(normalized)["items"],
+                    "factor_summary": self.get_factor_summary_by_symbol(normalized),
                     "report": self._report_link(self.stock_report_file(normalized)),
                 }
         return {
@@ -143,6 +209,7 @@ class OutputLoader:
             "symbol": normalized,
             "item": None,
             "factor_explanations": [],
+            "factor_summary": self.get_factor_summary_by_symbol(normalized),
             "report": self._report_link(self.stock_report_file(normalized)),
         }
 
@@ -180,6 +247,73 @@ class OutputLoader:
             "symbol": normalized,
             "count": len(rows),
             "items": rows,
+        }
+
+    def get_factor_summary_by_symbol(self, symbol: str) -> dict[str, Any]:
+        normalized = self._normalize_symbol(symbol)
+        payload = self.get_factor_explanations_by_symbol(normalized)
+        if not payload["items"]:
+            return {
+                "ok": False,
+                "message": NO_FACTOR_EXPLANATIONS_MESSAGE,
+                "as_of_date": payload["as_of_date"],
+                "symbol": normalized,
+                "count": 0,
+                "items": [],
+                "positive_factors": [],
+                "risk_factors": [],
+                "watch_signals": [],
+                "explanation": NO_FACTOR_EXPLANATIONS_MESSAGE,
+            }
+
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in payload["items"]:
+            group_key = self._factor_group_key(str(row.get("factor_group", "")))
+            item = grouped.setdefault(
+                group_key,
+                {
+                    "factor_group": group_key,
+                    "display_name": FACTOR_GROUP_LABELS.get(group_key, group_key),
+                    "normalized_score": 0.0,
+                    "weight": 0.0,
+                    "contribution": 0.0,
+                    "explanations": [],
+                },
+            )
+            item["normalized_score"] += self._number(row.get("normalized_score"))
+            item["weight"] += self._number(row.get("weight"))
+            item["contribution"] += self._number(row.get("contribution"))
+            explanation = str(row.get("explanation", "") or "").strip()
+            if explanation:
+                item["explanations"].append(explanation)
+
+        summaries = []
+        for item in grouped.values():
+            explanations = item.pop("explanations")
+            item["explanation"] = "；".join(explanations[:3])
+            summaries.append(item)
+        summaries = sorted(summaries, key=lambda row: self._number(row.get("contribution")), reverse=True)
+        positive = [row for row in summaries if self._number(row.get("contribution")) > 0][:3]
+        risks = [
+            row for row in summaries
+            if row["factor_group"] == "risk" or self._number(row.get("normalized_score")) < 0.35 or self._number(row.get("contribution")) < 0
+        ][:3]
+        watch = [
+            row for row in summaries
+            if row not in positive and row not in risks
+        ][:3]
+        explanation = self._score_explanation(summaries, risks)
+        return {
+            "ok": True,
+            "message": "",
+            "as_of_date": payload["as_of_date"],
+            "symbol": normalized,
+            "count": len(summaries),
+            "items": summaries,
+            "positive_factors": positive,
+            "risk_factors": risks,
+            "watch_signals": watch,
+            "explanation": explanation,
         }
 
     def load_summary(self) -> dict[str, Any]:
@@ -296,6 +430,8 @@ class OutputLoader:
             "message": NO_DAILY_OUTPUT_MESSAGE,
             "as_of_date": as_of_date,
             "count": 0,
+            "total_count": 0,
+            "filters": {},
             "items": [],
             "label_distribution": {},
             "high_confidence": [],
@@ -376,3 +512,63 @@ class OutputLoader:
             return float(row.get("total_score", 0) or 0)
         except (TypeError, ValueError):
             return 0.0
+
+    def _candidate_filter_error(self, *, sort_by: str, sort_order: str, limit: int | None) -> str:
+        if sort_by not in SORTABLE_CANDIDATE_FIELDS:
+            return "Invalid sort_by. Supported fields: " + ", ".join(sorted(SORTABLE_CANDIDATE_FIELDS))
+        if sort_order not in {"asc", "desc"}:
+            return "Invalid sort_order. Supported values: asc, desc."
+        if limit is not None and limit < 1:
+            return "Invalid limit. It must be greater than 0."
+        return ""
+
+    def _filter_candidate_rows(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        label: str | None,
+        min_score: float | None,
+        max_score: float | None,
+        min_confidence: float | None,
+    ) -> list[dict[str, Any]]:
+        filtered = rows
+        if label:
+            filtered = [row for row in filtered if str(row.get("label", "")) == label]
+        if min_score is not None:
+            filtered = [row for row in filtered if self._number(row.get("total_score")) >= min_score]
+        if max_score is not None:
+            filtered = [row for row in filtered if self._number(row.get("total_score")) <= max_score]
+        if min_confidence is not None:
+            filtered = [row for row in filtered if self._number(row.get("confidence")) >= min_confidence]
+        return filtered
+
+    def _sort_candidate_rows(self, rows: list[dict[str, Any]], *, sort_by: str, sort_order: str) -> list[dict[str, Any]]:
+        reverse = sort_order == "desc"
+        return sorted(rows, key=lambda row: self._number(row.get(sort_by)), reverse=reverse)
+
+    def _number(self, value: Any) -> float:
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _factor_group_key(self, value: str) -> str:
+        text = value.lower()
+        if "relative" in text or "strength" in text:
+            return "relative_strength"
+        if "momentum" in text:
+            return "momentum"
+        if "trend" in text or "ma" in text:
+            return "trend"
+        if "risk" in text or "drawdown" in text or "volatility" in text:
+            return "risk"
+        if "liquidity" in text or "amount" in text or "volume" in text:
+            return "liquidity"
+        return text or "other"
+
+    def _score_explanation(self, summaries: list[dict[str, Any]], risks: list[dict[str, Any]]) -> str:
+        leaders = [str(row.get("display_name", "")) for row in summaries[:2] if row.get("display_name")]
+        if not leaders:
+            return "当前候选排序来自综合评分，仍需结合后续数据复核。该结论仅用于个人研究排序，不构成投资建议。"
+        risk_text = "风险分没有触发重大扣分" if not risks else "仍需关注风险相关因子的变化"
+        return f"该股票当前综合分主要由{'和'.join(leaders)}贡献，{risk_text}。该结论仅用于个人研究排序，不构成投资建议。"

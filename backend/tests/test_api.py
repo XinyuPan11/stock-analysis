@@ -41,6 +41,54 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["items"][0]["symbol"], "sh.600016")
         self.assertEqual(payload["label_distribution"]["高置信候选"], 1)
 
+    def test_candidates_filter_by_label(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/candidates", params={"label": "候选关注"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["symbol"], "sh.600015")
+        self.assertEqual(payload["filters"]["label"], "候选关注")
+
+    def test_candidates_filter_by_min_score(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/candidates", params={"min_score": 90})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["symbol"], "sh.600016")
+
+    def test_candidates_sort_by_total_score_desc(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/candidates", params={"sort_by": "total_score", "sort_order": "desc"})
+
+        self.assertEqual(response.status_code, 200)
+        scores = [row["total_score"] for row in response.json()["items"]]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
+    def test_invalid_sort_by_returns_clear_error_without_crashing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/candidates", params={"sort_by": "not_a_factor"})
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertIn("Invalid sort_by", payload["message"])
+
     def test_candidate_detail_api_returns_single_stock(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             _write_outputs(temp_dir)
@@ -69,6 +117,23 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["symbol"], "sh.600016")
         self.assertEqual(payload["count"], 2)
         self.assertEqual(payload["items"][0]["factor_group"], "momentum_60d")
+
+    def test_factor_summary_for_symbol_returns_grouped_contributions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/factor-summary/sh.600016")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["symbol"], "sh.600016")
+        groups = {row["factor_group"]: row for row in payload["items"]}
+        self.assertIn("momentum", groups)
+        self.assertIn("trend", groups)
+        self.assertEqual(groups["trend"]["contribution"], 20.0)
+        self.assertIn("个人研究排序", payload["explanation"])
 
     def test_summary_returns_summary_when_file_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -120,6 +185,9 @@ class ApiTests(unittest.TestCase):
         self.assertIn("A 股个人研究终端", text)
         self.assertIn("最新数据日期", text)
         self.assertIn("Top N 候选股", text)
+        self.assertIn("筛选与排序", text)
+        self.assertIn("当前筛选条件", text)
+        self.assertIn("筛选后候选数量", text)
         self.assertIn("/stocks/sh.600016", text)
         self.assertIn("/reports/stocks/sh.600016", text)
         self.assertIn("标签分布", text)
@@ -142,10 +210,26 @@ class ApiTests(unittest.TestCase):
         self.assertIn("高置信候选", text)
         self.assertIn("total_score", text)
         self.assertIn("positive_evidence", text)
+        self.assertIn("因子贡献总览", text)
+        self.assertIn("主要正向因子", text)
+        self.assertIn("主要负向/风险因子", text)
+        self.assertIn("需要继续观察的信号", text)
+        self.assertIn("分数解释", text)
         self.assertIn("因子贡献表", text)
         self.assertIn("单股报告", text)
         self.assertIn("返回首页", text)
         self.assertIn("仅为个人研究辅助，不构成投资建议", text)
+
+    def test_stock_detail_page_shows_factor_fallback_when_explanations_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            Path(temp_dir, "daily", "factor_explanations_2024-01-31.json").unlink()
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/stocks/sh.600016")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("暂无真实因子贡献表，请先生成 factor_explanations 输出", response.text)
 
     def test_daily_report_page_returns_html(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -203,6 +287,7 @@ class ApiTests(unittest.TestCase):
                 json.dumps(client.get("/api/candidates/sh.600016").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/factor-explanations").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/factor-explanations/sh.600016").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/factor-summary/sh.600016").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/summary").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/backtest").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/reports").json(), ensure_ascii=False),

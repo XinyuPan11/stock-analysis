@@ -13,6 +13,7 @@ from stock_analysis.api.schemas import (
     CandidateDetailResponse,
     CandidatesResponse,
     FactorExplanationsResponse,
+    FactorSummaryResponse,
     LatestOutputResponse,
     NO_DAILY_OUTPUT_MESSAGE,
     NO_STOCK_REPORT_MESSAGE,
@@ -30,13 +31,30 @@ def get_loader(request: Request) -> OutputLoader:
 
 
 @router.get("/", response_class=HTMLResponse)
-def dashboard(request: Request) -> HTMLResponse:
+def dashboard(
+    request: Request,
+    label: str | None = None,
+    min_score: float | None = None,
+    max_score: float | None = None,
+    min_confidence: float | None = None,
+    sort_by: str = "total_score",
+    sort_order: str = "desc",
+    limit: int | None = None,
+) -> HTMLResponse:
     loader = get_loader(request)
     latest = loader.latest()
     if not latest["ok"]:
         return HTMLResponse(_empty_dashboard(str(latest["outputs_dir"])))
 
-    candidates = loader.load_candidates()
+    candidates = loader.load_candidates(
+        label=label,
+        min_score=min_score,
+        max_score=max_score,
+        min_confidence=min_confidence,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        limit=limit,
+    )
     summary = loader.load_summary()
     backtest = loader.load_backtest()
     reports = loader.reports()
@@ -78,8 +96,28 @@ def latest(request: Request) -> dict[str, Any]:
 
 
 @router.get("/api/candidates", response_model=CandidatesResponse)
-def candidates(request: Request) -> dict[str, Any]:
-    return get_loader(request).load_candidates()
+def candidates(
+    request: Request,
+    label: str | None = None,
+    min_score: float | None = None,
+    max_score: float | None = None,
+    min_confidence: float | None = None,
+    sort_by: str = "total_score",
+    sort_order: str = "desc",
+    limit: int | None = None,
+) -> Any:
+    payload = get_loader(request).load_candidates(
+        label=label,
+        min_score=min_score,
+        max_score=max_score,
+        min_confidence=min_confidence,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        limit=limit,
+    )
+    if not payload["ok"] and payload["as_of_date"]:
+        return JSONResponse(payload, status_code=400)
+    return payload
 
 
 @router.get("/api/candidates/{symbol}", response_model=CandidateDetailResponse)
@@ -99,6 +137,14 @@ def factor_explanations(request: Request) -> dict[str, Any]:
 def factor_explanations_for_symbol(request: Request, symbol: str) -> Any:
     payload = get_loader(request).get_factor_explanations_by_symbol(symbol)
     if not payload["items"] and payload["ok"]:
+        return JSONResponse(payload, status_code=404)
+    return payload
+
+
+@router.get("/api/factor-summary/{symbol}", response_model=FactorSummaryResponse)
+def factor_summary_for_symbol(request: Request, symbol: str) -> Any:
+    payload = get_loader(request).get_factor_summary_by_symbol(symbol)
+    if not payload["ok"]:
         return JSONResponse(payload, status_code=404)
     return payload
 
@@ -172,7 +218,9 @@ def _dashboard_html(
     backtest: dict[str, Any],
     reports: dict[str, Any],
 ) -> str:
-    rows = candidates.get("items", [])[:10]
+    filters = candidates.get("filters", {})
+    default_limit = int(filters.get("limit") or 10)
+    rows = candidates.get("items", [])[:default_limit]
     distribution = candidates.get("label_distribution", {})
     high_confidence = candidates.get("high_confidence", [])
     summary_payload = summary.get("summary", {})
@@ -193,6 +241,11 @@ def _dashboard_html(
     <section>
       <h2>Pipeline Summary</h2>
       {_summary_grid(summary_payload)}
+    </section>
+
+    <section>
+      <h2>筛选与排序</h2>
+      {_filter_panel(filters, candidates)}
     </section>
 
     <section>
@@ -242,6 +295,7 @@ def _stock_detail_html(detail: dict[str, Any]) -> str:
     symbol = str(row.get("symbol") or detail.get("symbol") or "")
     name = str(row.get("name") or "")
     explanations = detail.get("factor_explanations", [])
+    factor_summary = detail.get("factor_summary") or {}
     report = detail.get("report") or {}
     scores = [
         ("total_score", row.get("total_score", "")),
@@ -270,6 +324,11 @@ def _stock_detail_html(detail: dict[str, Any]) -> str:
       </div>
     </section>
 
+    <section>
+      <h2>分数解释</h2>
+      <p>{escape(str(factor_summary.get("explanation") or "当前候选排序来自综合评分，仍需结合后续数据复核。该结论仅用于个人研究排序，不构成投资建议。"))}</p>
+    </section>
+
     <section class="columns">
       <div>
         <h2>正向证据</h2>
@@ -288,6 +347,26 @@ def _stock_detail_html(detail: dict[str, Any]) -> str:
           <dt>warnings</dt>
           <dd>{escape(_fallback(row.get("warnings"), "暂无数据 warning。"))}</dd>
         </dl>
+      </div>
+    </section>
+
+    <section>
+      <h2>因子贡献总览</h2>
+      {_factor_summary_table(factor_summary)}
+    </section>
+
+    <section class="columns three">
+      <div>
+        <h2>主要正向因子</h2>
+        {_factor_cards(factor_summary.get("positive_factors", []), "暂无显著正向因子。")}
+      </div>
+      <div>
+        <h2>主要负向/风险因子</h2>
+        {_factor_cards(factor_summary.get("risk_factors", []), "暂无显著负向或风险因子。")}
+      </div>
+      <div>
+        <h2>需要继续观察的信号</h2>
+        {_factor_cards(factor_summary.get("watch_signals", []), "暂无额外观察信号。")}
       </div>
     </section>
 
@@ -373,7 +452,7 @@ def _candidate_table(rows: list[dict[str, Any]]) -> str:
         return "<p class=\"muted\">暂无候选股数据。</p>"
     body = "".join(_candidate_row(row) for row in rows)
     return f"""<div class="table-wrap"><table>
-<thead><tr><th>Rank</th><th>Symbol</th><th>Name</th><th>Score</th><th>Label</th><th>Risk</th><th>Report</th></tr></thead>
+<thead><tr><th>rank</th><th>symbol</th><th>name</th><th>label</th><th>total_score</th><th>confidence</th><th>momentum</th><th>trend</th><th>relative_strength</th><th>risk_score</th><th>liquidity</th><th>risk_flags</th><th>detail</th><th>report</th></tr></thead>
 <tbody>{body}</tbody>
 </table></div>"""
 
@@ -389,17 +468,105 @@ def _candidate_row(row: dict[str, Any]) -> str:
         f"<td>{escape(str(row.get('rank', '')))}</td>"
         f"<td><a href=\"{detail_href}\">{escape(symbol)}</a></td>"
         f"<td><a href=\"{detail_href}\">{escape(name)}</a></td>"
-        f"<td>{escape(_format_metric(row.get('total_score', '')))}</td>"
         f"<td><span class=\"tag-badge\">{escape(str(row.get('label', '')))}</span></td>"
+        f"<td>{escape(_format_metric(row.get('total_score', '')))}</td>"
+        f"<td>{escape(_format_metric(row.get('confidence', '')))}</td>"
+        f"<td>{escape(_format_metric(row.get('momentum_score', '')))}</td>"
+        f"<td>{escape(_format_metric(row.get('trend_score', '')))}</td>"
+        f"<td>{escape(_format_metric(row.get('relative_strength_score', '')))}</td>"
+        f"<td>{escape(_format_metric(row.get('risk_score', '')))}</td>"
+        f"<td>{escape(_format_metric(row.get('liquidity_score', '')))}</td>"
         f"<td class=\"risk-cell\">{escape(risk)}</td>"
+        f"<td><a href=\"{detail_href}\">详情</a></td>"
         f"<td><a href=\"{report_href}\">报告</a></td>"
         "</tr>"
     )
 
 
+def _filter_panel(filters: dict[str, Any], candidates: dict[str, Any]) -> str:
+    label = str(filters.get("label") or "")
+    sort_by = str(filters.get("sort_by") or "total_score")
+    sort_order = str(filters.get("sort_order") or "desc")
+    min_score = _form_value(filters.get("min_score"))
+    max_score = _form_value(filters.get("max_score"))
+    min_confidence = _form_value(filters.get("min_confidence"))
+    limit = _form_value(filters.get("limit"))
+    label_options = [""] + RESEARCH_LABELS
+    options = "".join(
+        f"<option value=\"{escape(value)}\"{' selected' if value == label else ''}>{escape(value or '全部')}</option>"
+        for value in label_options
+    )
+    sort_options = [
+        "rank",
+        "total_score",
+        "confidence",
+        "momentum_score",
+        "trend_score",
+        "relative_strength_score",
+        "risk_score",
+        "liquidity_score",
+    ]
+    sort_select = "".join(
+        f"<option value=\"{field}\"{' selected' if field == sort_by else ''}>{field}</option>"
+        for field in sort_options
+    )
+    order_select = "".join(
+        f"<option value=\"{order}\"{' selected' if order == sort_order else ''}>{order}</option>"
+        for order in ["desc", "asc"]
+    )
+    quick_links = [
+        ("按分数排序", "/?sort_by=total_score&sort_order=desc"),
+        ("按风险分排序", "/?sort_by=risk_score&sort_order=asc"),
+        ("按置信度排序", "/?sort_by=confidence&sort_order=desc"),
+    ]
+    label_links = [("全部", "/")] + [(label_name, f"/?label={label_name}") for label_name in RESEARCH_LABELS]
+    warning = f"<p class=\"notice-text\">{escape(candidates.get('message', ''))}</p>" if candidates.get("message") else ""
+    return f"""
+    <form method="get" class="filter-form">
+      <label>标签
+        <select name="label">{options}</select>
+      </label>
+      <label>最低分
+        <input name="min_score" type="number" step="0.01" value="{escape(min_score)}">
+      </label>
+      <label>最高分
+        <input name="max_score" type="number" step="0.01" value="{escape(max_score)}">
+      </label>
+      <label>最低置信度
+        <input name="min_confidence" type="number" step="0.01" value="{escape(min_confidence)}">
+      </label>
+      <label>排序
+        <select name="sort_by">{sort_select}</select>
+      </label>
+      <label>方向
+        <select name="sort_order">{order_select}</select>
+      </label>
+      <label>数量
+        <input name="limit" type="number" min="1" value="{escape(limit)}">
+      </label>
+      <button type="submit">应用</button>
+    </form>
+    {warning}
+    <p class="muted">当前筛选条件：label={escape(label or '全部')}，min_score={escape(min_score or '无')}，max_score={escape(max_score or '无')}，min_confidence={escape(min_confidence or '无')}，sort_by={escape(sort_by)}，sort_order={escape(sort_order)}，limit={escape(limit or '默认10')}</p>
+    <p>筛选后候选数量：<strong>{escape(str(candidates.get("count", 0)))}</strong> / 原始数量：{escape(str(candidates.get("total_count", 0)))}</p>
+    <div class="link-row">
+      {''.join(f'<a href="{escape(href)}">{escape(text)}</a>' for text, href in quick_links)}
+    </div>
+    <div class="link-row label-links">
+      {''.join(f'<a href="{escape(href)}">{escape(text)}</a>' for text, href in label_links)}
+    </div>
+    """
+
+
+def _form_value(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
 def _factor_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return "<p class=\"muted\">暂无因子贡献数据。</p>"
+        return "<p class=\"muted\">暂无真实因子贡献表，请先生成 factor_explanations 输出。</p>"
     columns = ["factor_group", "raw_value", "normalized_score", "weight", "contribution", "explanation"]
     header = "".join(f"<th>{escape(column)}</th>" for column in columns)
     body = "".join(
@@ -407,6 +574,30 @@ def _factor_table(rows: list[dict[str, Any]]) -> str:
         for row in rows
     )
     return f"<div class=\"table-wrap\"><table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table></div>"
+
+
+def _factor_summary_table(summary: dict[str, Any]) -> str:
+    rows = summary.get("items") if isinstance(summary, dict) else []
+    if not rows:
+        return "<p class=\"muted\">暂无真实因子贡献表，请先生成 factor_explanations 输出。</p>"
+    columns = ["display_name", "factor_group", "normalized_score", "weight", "contribution", "explanation"]
+    header = "".join(f"<th>{escape(column)}</th>" for column in columns)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{escape(_format_metric(row.get(column, '')))}</td>" for column in columns) + "</tr>"
+        for row in rows
+    )
+    return f"<div class=\"table-wrap\"><table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table></div>"
+
+
+def _factor_cards(rows: list[dict[str, Any]], fallback: str) -> str:
+    if not rows:
+        return f"<p class=\"muted\">{escape(fallback)}</p>"
+    return "<ul class=\"factor-list\">" + "".join(
+        f"<li><strong>{escape(str(row.get('display_name') or row.get('factor_group') or ''))}</strong>"
+        f"<span>contribution {escape(_format_metric(row.get('contribution', '')))} / normalized {escape(_format_metric(row.get('normalized_score', '')))}</span>"
+        f"<p>{escape(str(row.get('explanation') or ''))}</p></li>"
+        for row in rows
+    ) + "</ul>"
 
 
 def _distribution_list(distribution: dict[str, int]) -> str:
@@ -576,8 +767,16 @@ h2 { margin: 0 0 14px; font-size: 19px; letter-spacing: 0; }
 p { line-height: 1.65; }
 section { margin-top: 24px; background: #ffffff; border: 1px solid #dde3ec; border-radius: 8px; padding: 18px; }
 .columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+.columns.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .columns > div { min-width: 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.filter-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 12px; align-items: end; }
+.filter-form label { display: grid; gap: 5px; color: #455468; font-size: 13px; }
+.filter-form input, .filter-form select { min-height: 34px; border: 1px solid #cfd6e1; border-radius: 6px; padding: 5px 8px; font: inherit; background: #fff; }
+.filter-form button { min-height: 36px; border: 1px solid #1f5f99; border-radius: 6px; background: #1f5f99; color: #fff; font: inherit; cursor: pointer; }
+.link-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.link-row a { border: 1px solid #d5deea; border-radius: 999px; padding: 5px 9px; background: #fbfcfe; font-size: 13px; }
+.notice-text { color: #9a5b00; }
 .metric { border: 1px solid #e0e5ed; border-radius: 8px; padding: 12px; background: #fbfcfe; min-height: 62px; }
 .metric span { display: block; color: #667085; font-size: 12px; margin-bottom: 8px; overflow-wrap: anywhere; }
 .metric strong { display: block; font-size: 16px; overflow-wrap: anywhere; }
@@ -587,6 +786,10 @@ table { border-collapse: collapse; width: 100%; min-width: 760px; }
 th, td { border-bottom: 1px solid #e4e8ef; padding: 10px 8px; text-align: left; vertical-align: top; font-size: 14px; }
 th { color: #455468; background: #f3f5f8; }
 ul { margin: 0; padding-left: 20px; line-height: 1.7; }
+.factor-list { list-style: none; padding-left: 0; display: grid; gap: 10px; }
+.factor-list li { border: 1px solid #e0e5ed; border-radius: 8px; padding: 10px; background: #fbfcfe; }
+.factor-list span { display: block; color: #667085; font-size: 12px; margin-top: 4px; }
+.factor-list p { margin: 6px 0 0; }
 dl { margin: 0; }
 dt { color: #667085; font-size: 12px; margin-top: 10px; }
 dt:first-child { margin-top: 0; }
@@ -602,7 +805,7 @@ a:hover { text-decoration: underline; }
 .markdown-report { line-height: 1.7; }
 .disclaimer { margin-top: 24px; color: #4b5563; font-size: 14px; }
 @media (max-width: 760px) {
-  .topbar, .columns { display: block; }
+  .topbar, .columns, .columns.three { display: block; }
   .badge, .tag-badge { margin-top: 10px; white-space: normal; }
   h1 { font-size: 24px; }
 }

@@ -24,6 +24,8 @@ class LatestOutputResponse(ApiMessage):
 class CandidatesResponse(ApiMessage):
     as_of_date: str | None = None
     count: int = 0
+    total_count: int = 0
+    filters: dict[str, Any] = Field(default_factory=dict)
     items: list[dict[str, Any]] = Field(default_factory=list)
     label_distribution: dict[str, int] = Field(default_factory=dict)
     high_confidence: list[dict[str, Any]] = Field(default_factory=list)
@@ -34,6 +36,7 @@ class CandidateDetailResponse(ApiMessage):
     symbol: str
     item: dict[str, Any] | None = None
     factor_explanations: list[dict[str, Any]] = Field(default_factory=list)
+    factor_summary: dict[str, Any] | None = None
     report: dict[str, Any] | None = None
 
 
@@ -42,6 +45,17 @@ class FactorExplanationsResponse(ApiMessage):
     symbol: str | None = None
     count: int = 0
     items: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class FactorSummaryResponse(ApiMessage):
+    as_of_date: str | None = None
+    symbol: str | None = None
+    count: int = 0
+    items: list[dict[str, Any]] = Field(default_factory=list)
+    positive_factors: list[dict[str, Any]] = Field(default_factory=list)
+    risk_factors: list[dict[str, Any]] = Field(default_factory=list)
+    watch_signals: list[dict[str, Any]] = Field(default_factory=list)
+    explanation: str = ""
 
 
 class SummaryResponse(ApiMessage):
