@@ -115,6 +115,11 @@ def output_health_page(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/guide", response_class=HTMLResponse)
+def guide_page(request: Request) -> HTMLResponse:
+    return HTMLResponse(_guide_html(get_loader(request).get_guide()))
+
+
 @router.get("/reports/daily", response_class=HTMLResponse)
 def daily_report_page(request: Request) -> HTMLResponse:
     content = get_loader(request).get_daily_report()
@@ -280,6 +285,11 @@ def data_quality(request: Request) -> dict[str, Any]:
     return get_loader(request).get_data_quality_summary()
 
 
+@router.get("/api/guide")
+def guide(request: Request) -> dict[str, Any]:
+    return get_loader(request).get_guide()
+
+
 @router.get("/api/summary", response_model=SummaryResponse)
 def summary(request: Request) -> dict[str, Any]:
     return get_loader(request).load_summary()
@@ -375,6 +385,7 @@ def _dashboard_html(
         <a class="primary-link" href="/compare">查看候选股横向对比</a>
         <a class="primary-link" href="/reports">报告中心</a>
         <a class="primary-link" href="/health/outputs">输出健康检查</a>
+        <a class="primary-link" href="/guide">运行指引 / 操作手册</a>
       </div>
     </section>
 
@@ -565,6 +576,51 @@ def _output_health_html(health: dict[str, Any], failed: dict[str, Any], quality:
     <p class="disclaimer">仅为个人研究辅助，不构成投资建议。</p>
     """
     return _page_shell("输出健康检查", body)
+
+
+def _guide_html(guide: dict[str, Any]) -> str:
+    body = f"""
+    <header class="topbar">
+      <div>
+        <a href="/" class="back-link">返回首页</a>
+        <h1>A 股个人研究终端运行指引</h1>
+      </div>
+      <span class="badge">Guide</span>
+    </header>
+
+    <section>
+      <h2>推荐日常运行顺序</h2>
+      {_ordered_list(guide.get("recommended_workflow", []))}
+    </section>
+
+    <section>
+      <h2>常用命令</h2>
+      {_command_sections(guide.get("commands", {}))}
+    </section>
+
+    <section>
+      <h2>主要输出文件说明</h2>
+      {_plain_list(guide.get("output_paths", []))}
+    </section>
+
+    <section>
+      <h2>Dashboard 页面导航</h2>
+      {_navigation_table(guide.get("navigation", []))}
+    </section>
+
+    <section>
+      <h2>常见问题和排错</h2>
+      {_plain_list(guide.get("troubleshooting", []))}
+    </section>
+
+    <section>
+      <h2>当前 Phase 状态</h2>
+      {_plain_list(guide.get("phase_status", []))}
+    </section>
+
+    <p class="disclaimer">{escape((guide.get("disclaimers") or ["仅为个人研究辅助，不构成投资建议。"])[0])}</p>
+    """
+    return _page_shell("A 股个人研究终端运行指引", body)
 
 
 def _stock_detail_html(detail: dict[str, Any]) -> str:
@@ -981,6 +1037,46 @@ def _data_quality_panel(quality: dict[str, Any]) -> str:
     """
 
 
+def _ordered_list(items: list[str]) -> str:
+    if not items:
+        return "<p class=\"muted\">暂无内容。</p>"
+    return "<ol>" + "".join(f"<li>{escape(str(item))}</li>" for item in items) + "</ol>"
+
+
+def _plain_list(items: list[str]) -> str:
+    if not items:
+        return "<p class=\"muted\">暂无内容。</p>"
+    return "<ul>" + "".join(f"<li>{escape(str(item))}</li>" for item in items) + "</ul>"
+
+
+def _command_sections(commands: dict[str, list[str]]) -> str:
+    if not commands:
+        return "<p class=\"muted\">暂无命令。</p>"
+    sections = []
+    for title, lines in commands.items():
+        command_text = "\n".join(str(line) for line in lines)
+        sections.append(
+            f"<div class=\"command-block\"><h3>{escape(str(title))}</h3>"
+            f"<pre><code>{escape(command_text)}</code></pre></div>"
+        )
+    return "".join(sections)
+
+
+def _navigation_table(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "<p class=\"muted\">暂无导航。</p>"
+    header = "<th>path</th><th>说明</th><th>链接</th>"
+    body_parts = []
+    for item in items:
+        path = str(item.get("path", ""))
+        label = str(item.get("label", ""))
+        link = "" if "{" in path else f"<a href=\"{escape(path)}\">打开</a>"
+        body_parts.append(
+            f"<tr><td><code>{escape(path)}</code></td><td>{escape(label)}</td><td>{link}</td></tr>"
+        )
+    return f"<div class=\"table-wrap\"><table><thead><tr>{header}</tr></thead><tbody>{''.join(body_parts)}</tbody></table></div>"
+
+
 def _risk_compare_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return "<p class=\"muted\">暂无风险对比数据。</p>"
@@ -1220,6 +1316,9 @@ section { margin-top: 24px; background: #ffffff; border: 1px solid #dde3ec; bord
 .metric { border: 1px solid #e0e5ed; border-radius: 8px; padding: 12px; background: #fbfcfe; min-height: 62px; }
 .metric span { display: block; color: #667085; font-size: 12px; margin-bottom: 8px; overflow-wrap: anywhere; }
 .metric strong { display: block; font-size: 16px; overflow-wrap: anywhere; }
+.command-block { margin-bottom: 16px; }
+pre { margin: 0; overflow-x: auto; background: #111827; color: #f9fafb; border-radius: 8px; padding: 12px; }
+code { font-family: Consolas, "Courier New", monospace; font-size: 13px; }
 .badge, .tag-badge { display: inline-block; border: 1px solid #9db7d8; color: #24466f; background: #eef5ff; border-radius: 999px; padding: 5px 9px; font-size: 13px; white-space: nowrap; }
 .table-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; min-width: 760px; }

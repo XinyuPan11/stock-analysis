@@ -80,6 +80,19 @@ python backend\scripts\run_api.py --outputs-dir outputs --host 127.0.0.1 --port 
 http://127.0.0.1:8000
 ```
 
+Phase 2 Dashboard 页面：
+
+```text
+/                         首页 Dashboard
+/compare                  候选股横向对比
+/reports                  报告中心
+/health/outputs           输出健康检查
+/guide                    运行指引 / 操作手册（日常运行入口）
+/stocks/{symbol}          单股详情页
+/reports/daily            每日报告
+/reports/stocks/{symbol}  单股报告
+```
+
 如果 `outputs/` 下没有每日研究产物，页面和 API 会提示：
 
 ```text

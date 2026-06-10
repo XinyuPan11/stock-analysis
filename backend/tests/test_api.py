@@ -190,6 +190,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn("筛选后候选数量", text)
         self.assertIn("/compare", text)
         self.assertIn("查看候选股横向对比", text)
+        self.assertIn("/guide", text)
+        self.assertIn("运行指引 / 操作手册", text)
         self.assertIn("/stocks/sh.600016", text)
         self.assertIn("/reports/stocks/sh.600016", text)
         self.assertIn("标签分布", text)
@@ -425,6 +427,47 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["fetch_error_count"], 1)
         self.assertIn("non_numeric_market_data", payload["error_type_counts"])
 
+    def test_guide_page_returns_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/guide")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("A 股个人研究终端运行指引", response.text)
+        self.assertIn("推荐日常运行顺序", response.text)
+        self.assertIn("常用命令", response.text)
+        self.assertIn("Dashboard 页面导航", response.text)
+        self.assertIn("仅为个人研究辅助，不构成投资建议", response.text)
+
+    def test_guide_api_returns_structured_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/guide")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("recommended_workflow", payload)
+        self.assertIn("commands", payload)
+        self.assertIn("output_paths", payload)
+        self.assertIn("troubleshooting", payload)
+        self.assertIn("phase_status", payload)
+        self.assertIn("disclaimers", payload)
+
+    def test_guide_page_contains_daily_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/guide")
+
+        self.assertIn("prewarm_market_cache.py", response.text)
+        self.assertIn("run_daily_research.py", response.text)
+        self.assertIn("generate_research_report.py", response.text)
+        self.assertIn("run_backtest.py", response.text)
+        self.assertIn("run_api.py", response.text)
+
     def test_stock_detail_page_shows_factor_fallback_when_explanations_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             _write_outputs(temp_dir)
@@ -487,6 +530,7 @@ class ApiTests(unittest.TestCase):
                 client.get("/compare").text,
                 client.get("/reports").text,
                 client.get("/health/outputs").text,
+                client.get("/guide").text,
                 client.get("/stocks/sh.600016").text,
                 client.get("/reports/daily").text,
                 client.get("/reports/stocks/sh.600016").text,
@@ -503,6 +547,7 @@ class ApiTests(unittest.TestCase):
                 json.dumps(client.get("/api/output-health").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/failed-symbols").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/data-quality").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/guide").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/summary").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/backtest").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/reports").json(), ensure_ascii=False),

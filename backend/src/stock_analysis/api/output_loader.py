@@ -632,6 +632,78 @@ class OutputLoader:
             },
         }
 
+    def get_guide(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "recommended_workflow": [
+                "预热缓存",
+                "生成每日候选股",
+                "生成研究报告",
+                "运行回测",
+                "启动 Dashboard",
+                "查看输出健康检查",
+            ],
+            "commands": {
+                "缓存预热": [
+                    '$env:HTTP_PROXY="http://127.0.0.1:8668"',
+                    '$env:HTTPS_PROXY="http://127.0.0.1:8668"',
+                    r"python backend\scripts\prewarm_market_cache.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --include-lookback-days 120 --limit 50 --batch-size 10 --cache-dir data\cache\phase1-final-smoke --output-dir outputs\cache --sleep-seconds 0.5 --retry 1 --resume",
+                ],
+                "每日研究 pipeline": [
+                    r"python backend\scripts\run_daily_research.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --benchmark CSI300 --top-n 10 --limit 50 --cache-dir data\cache\phase1-final-smoke --output-dir outputs\daily --retry 1",
+                ],
+                "生成研究报告": [
+                    r"python backend\scripts\generate_research_report.py --candidates outputs\daily\candidates_2024-01-31.json --summary outputs\daily\summary_2024-01-31.json --factors outputs\daily\factors_2024-01-31.json --factor-explanations outputs\daily\factor_explanations_2024-01-31.json --output-dir outputs\reports",
+                ],
+                "运行回测": [
+                    r"python backend\scripts\run_backtest.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --lookback-days 120 --rebalance-frequency monthly --top-n 5 --benchmark CSI300 --limit 50 --cache-dir data\cache\phase1-final-smoke --output-dir outputs\backtests --transaction-cost-bps 10 --retry 1",
+                ],
+                "启动 Dashboard": [
+                    r"python backend\scripts\run_api.py --outputs-dir outputs --host 127.0.0.1 --port 8000",
+                ],
+                "运行测试": [
+                    r"python -m unittest discover -s backend\tests",
+                ],
+            },
+            "output_paths": [
+                "outputs/daily/candidates_YYYY-MM-DD.json",
+                "outputs/daily/summary_YYYY-MM-DD.json",
+                "outputs/daily/factors_YYYY-MM-DD.json",
+                "outputs/daily/factor_explanations_YYYY-MM-DD.json",
+                "outputs/reports/daily_report_YYYY-MM-DD.md/html",
+                "outputs/reports/stocks/*.md/html",
+                "outputs/backtests/backtest_summary_YYYY-MM-DD.json",
+                "outputs/backtests/backtest_report_YYYY-MM-DD.md/html",
+                "outputs/cache/cache_prewarm_summary_YYYY-MM-DD.json",
+                "outputs/errors/failed_symbols_YYYY-MM-DD.csv",
+            ],
+            "navigation": [
+                {"path": "/", "label": "首页 Dashboard"},
+                {"path": "/compare", "label": "候选股横向对比"},
+                {"path": "/reports", "label": "报告中心"},
+                {"path": "/health/outputs", "label": "输出健康检查"},
+                {"path": "/guide", "label": "运行指引"},
+                {"path": "/stocks/{symbol}", "label": "单股详情页"},
+                {"path": "/reports/daily", "label": "每日报告"},
+                {"path": "/reports/stocks/{symbol}", "label": "单股报告"},
+            ],
+            "troubleshooting": [
+                "如果页面提示 No daily research output found，先运行 run_daily_research.py。",
+                "如果报告缺失，先运行 generate_research_report.py。",
+                "如果回测缺失，先运行 run_backtest.py。",
+                "如果 BaoStock 慢，先运行 prewarm_market_cache.py 并使用 resume。",
+                "如果看到 pandas/numexpr warning，当前不影响运行。",
+                "如果 GitHub 网络失败，确认代理 127.0.0.1:8668 可用。",
+                "如果 outputs 健康检查有 missing files，按页面提示补跑对应命令。",
+            ],
+            "phase_status": [
+                "Phase 1：已完成并合并 main",
+                "Phase 2：Dashboard 本地只读版本开发中",
+                "当前边界：只读 outputs，不拉数、不重算、不回测",
+            ],
+            "disclaimers": ["仅为个人研究辅助，不构成投资建议。"],
+        }
+
     def get_daily_report(self, format: str = "json") -> dict[str, Any]:
         return self._format_report_content(self.read_report(self.daily_report_file()), format=format)
 
