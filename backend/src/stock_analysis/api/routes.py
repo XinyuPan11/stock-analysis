@@ -32,30 +32,97 @@ def get_loader(request: Request) -> OutputLoader:
     return request.app.state.output_loader
 
 
+def _parse_optional_float(value: str | None, field: str) -> tuple[float | None, str]:
+    if value is None or value.strip() == "":
+        return None, ""
+    try:
+        return float(value), ""
+    except ValueError:
+        return None, f"Invalid {field}. It must be a number."
+
+
+def _parse_optional_int(value: str | None, field: str) -> tuple[int | None, str]:
+    if value is None or value.strip() == "":
+        return None, ""
+    try:
+        return int(value), ""
+    except ValueError:
+        return None, f"Invalid {field}. It must be an integer."
+
+
+def _parse_candidate_filter_params(
+    *,
+    min_score: str | None = None,
+    max_score: str | None = None,
+    min_confidence: str | None = None,
+    limit: str | None = None,
+) -> tuple[dict[str, Any], str]:
+    parsed_min_score, error = _parse_optional_float(min_score, "min_score")
+    if error:
+        return {}, error
+    parsed_max_score, error = _parse_optional_float(max_score, "max_score")
+    if error:
+        return {}, error
+    parsed_min_confidence, error = _parse_optional_float(min_confidence, "min_confidence")
+    if error:
+        return {}, error
+    parsed_limit, error = _parse_optional_int(limit, "limit")
+    if error:
+        return {}, error
+    return {
+        "min_score": parsed_min_score,
+        "max_score": parsed_max_score,
+        "min_confidence": parsed_min_confidence,
+        "limit": parsed_limit,
+    }, ""
+
+
+def _empty_filter_error_payload(loader: OutputLoader, message: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "message": message,
+        "as_of_date": loader.latest_daily_date(),
+        "count": 0,
+        "total_count": 0,
+        "filters": {},
+        "items": [],
+        "label_distribution": {},
+        "high_confidence": [],
+    }
+
+
 @router.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
     label: str | None = None,
-    min_score: float | None = None,
-    max_score: float | None = None,
-    min_confidence: float | None = None,
+    min_score: str | None = None,
+    max_score: str | None = None,
+    min_confidence: str | None = None,
     sort_by: str = "total_score",
     sort_order: str = "desc",
-    limit: int | None = None,
+    limit: str | None = None,
 ) -> HTMLResponse:
     loader = get_loader(request)
     latest = loader.latest()
     if not latest["ok"]:
         return HTMLResponse(_empty_dashboard(str(latest["outputs_dir"])))
-
-    candidates = loader.load_candidates(
-        label=label,
+    parsed_filters, filter_error = _parse_candidate_filter_params(
         min_score=min_score,
         max_score=max_score,
         min_confidence=min_confidence,
+        limit=limit,
+    )
+    if filter_error:
+        return HTMLResponse(_message_page("筛选参数错误", filter_error, back_href="/"), status_code=400)
+
+    candidates = loader.load_candidates(
+        label=label,
+        min_score=parsed_filters["min_score"],
+        max_score=parsed_filters["max_score"],
+        min_confidence=parsed_filters["min_confidence"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     summary = loader.load_summary()
     backtest = loader.load_backtest()
@@ -76,25 +143,28 @@ def stock_detail_page(request: Request, symbol: str) -> HTMLResponse:
 def compare_page(
     request: Request,
     label: str | None = None,
-    min_score: float | None = None,
+    min_score: str | None = None,
     sort_by: str = "total_score",
     sort_order: str = "desc",
-    limit: int | None = None,
+    limit: str | None = None,
 ) -> HTMLResponse:
     loader = get_loader(request)
+    parsed_filters, filter_error = _parse_candidate_filter_params(min_score=min_score, limit=limit)
+    if filter_error:
+        return HTMLResponse(_message_page("筛选参数错误", filter_error, back_href="/compare"), status_code=400)
     compare = loader.get_compare_rows(
         label=label,
-        min_score=min_score,
+        min_score=parsed_filters["min_score"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     factor_matrix = loader.get_factor_group_matrix(
         label=label,
-        min_score=min_score,
+        min_score=parsed_filters["min_score"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     return HTMLResponse(_compare_html(compare, factor_matrix))
 
@@ -151,21 +221,30 @@ def latest(request: Request) -> dict[str, Any]:
 def candidates(
     request: Request,
     label: str | None = None,
-    min_score: float | None = None,
-    max_score: float | None = None,
-    min_confidence: float | None = None,
+    min_score: str | None = None,
+    max_score: str | None = None,
+    min_confidence: str | None = None,
     sort_by: str = "total_score",
     sort_order: str = "desc",
-    limit: int | None = None,
+    limit: str | None = None,
 ) -> Any:
-    payload = get_loader(request).load_candidates(
-        label=label,
+    loader = get_loader(request)
+    parsed_filters, filter_error = _parse_candidate_filter_params(
         min_score=min_score,
         max_score=max_score,
         min_confidence=min_confidence,
+        limit=limit,
+    )
+    if filter_error:
+        return JSONResponse(_empty_filter_error_payload(loader, filter_error), status_code=400)
+    payload = loader.load_candidates(
+        label=label,
+        min_score=parsed_filters["min_score"],
+        max_score=parsed_filters["max_score"],
+        min_confidence=parsed_filters["min_confidence"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     if not payload["ok"] and payload["as_of_date"]:
         return JSONResponse(payload, status_code=400)
@@ -184,17 +263,21 @@ def candidate_detail(request: Request, symbol: str) -> Any:
 def compare_api(
     request: Request,
     label: str | None = None,
-    min_score: float | None = None,
+    min_score: str | None = None,
     sort_by: str = "total_score",
     sort_order: str = "desc",
-    limit: int | None = None,
+    limit: str | None = None,
 ) -> Any:
-    payload = get_loader(request).get_compare_rows(
+    loader = get_loader(request)
+    parsed_filters, filter_error = _parse_candidate_filter_params(min_score=min_score, limit=limit)
+    if filter_error:
+        return JSONResponse(_empty_filter_error_payload(loader, filter_error), status_code=400)
+    payload = loader.get_compare_rows(
         label=label,
-        min_score=min_score,
+        min_score=parsed_filters["min_score"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     if not payload["ok"] and payload["as_of_date"]:
         return JSONResponse(payload, status_code=400)
@@ -226,17 +309,21 @@ def factor_summary_for_symbol(request: Request, symbol: str) -> Any:
 def factor_groups(
     request: Request,
     label: str | None = None,
-    min_score: float | None = None,
+    min_score: str | None = None,
     sort_by: str = "total_score",
     sort_order: str = "desc",
-    limit: int | None = None,
+    limit: str | None = None,
 ) -> Any:
-    payload = get_loader(request).get_factor_group_matrix(
+    loader = get_loader(request)
+    parsed_filters, filter_error = _parse_candidate_filter_params(min_score=min_score, limit=limit)
+    if filter_error:
+        return JSONResponse(_empty_filter_error_payload(loader, filter_error), status_code=400)
+    payload = loader.get_factor_group_matrix(
         label=label,
-        min_score=min_score,
+        min_score=parsed_filters["min_score"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     if not payload["ok"] and payload["as_of_date"]:
         return JSONResponse(payload, status_code=400)
@@ -248,18 +335,22 @@ def factor_group_detail(
     request: Request,
     factor_group: str,
     label: str | None = None,
-    min_score: float | None = None,
+    min_score: str | None = None,
     sort_by: str = "total_score",
     sort_order: str = "desc",
-    limit: int | None = None,
+    limit: str | None = None,
 ) -> Any:
-    payload = get_loader(request).get_factor_group_comparison(
+    loader = get_loader(request)
+    parsed_filters, filter_error = _parse_candidate_filter_params(min_score=min_score, limit=limit)
+    if filter_error:
+        return JSONResponse(_empty_filter_error_payload(loader, filter_error), status_code=400)
+    payload = loader.get_factor_group_comparison(
         factor_group,
         label=label,
-        min_score=min_score,
+        min_score=parsed_filters["min_score"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     if not payload["ok"] and payload["as_of_date"]:
         return JSONResponse(payload, status_code=400)

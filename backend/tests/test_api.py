@@ -90,6 +90,30 @@ class ApiTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertIn("Invalid sort_by", payload["message"])
 
+    def test_candidates_empty_numeric_query_params_are_treated_as_unset(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            empty_response = client.get("/api/candidates?min_score=&limit=")
+            default_response = client.get("/api/candidates")
+
+        self.assertEqual(empty_response.status_code, 200)
+        self.assertEqual(empty_response.json()["count"], default_response.json()["count"])
+        self.assertEqual(empty_response.json()["items"], default_response.json()["items"])
+
+    def test_candidates_invalid_numeric_query_returns_clear_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/candidates?min_score=abc&limit=")
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertIn("Invalid min_score", payload["message"])
+
     def test_candidate_detail_api_returns_single_stock(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             _write_outputs(temp_dir)
@@ -329,6 +353,34 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["display_name"], "趋势")
         self.assertEqual(payload["count"], 2)
         self.assertEqual(payload["items"][0]["factor_group"], "trend")
+
+    def test_compare_empty_numeric_query_params_do_not_422(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            api_response = client.get("/api/compare?min_score=&limit=")
+            page_response = client.get("/compare?min_score=&limit=")
+            default_response = client.get("/api/compare")
+
+        self.assertEqual(api_response.status_code, 200)
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("text/html", page_response.headers["content-type"])
+        self.assertEqual(api_response.json()["count"], default_response.json()["count"])
+        self.assertEqual(api_response.json()["items"], default_response.json()["items"])
+
+    def test_compare_invalid_numeric_query_does_not_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            api_response = client.get("/api/compare?min_score=abc&limit=")
+            page_response = client.get("/compare?min_score=abc&limit=")
+
+        self.assertEqual(api_response.status_code, 400)
+        self.assertIn("Invalid min_score", api_response.json()["message"])
+        self.assertEqual(page_response.status_code, 400)
+        self.assertIn("Invalid min_score", page_response.text)
 
     def test_compare_page_shows_factor_fallback_when_explanations_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
