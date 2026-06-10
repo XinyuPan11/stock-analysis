@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from stock_analysis.api.schemas import NO_DAILY_OUTPUT_MESSAGE
+from stock_analysis.api.schemas import NO_DAILY_OUTPUT_MESSAGE, NO_STOCK_REPORT_MESSAGE
 
 
 DAILY_FILE_PATTERNS = {
@@ -97,11 +97,11 @@ class OutputLoader:
 
         payload = self._read_json(path, fallback=[])
         rows = payload.get("candidates", payload) if isinstance(payload, dict) else payload
-        if not isinstance(rows, list):
-            rows = []
+        rows = rows if isinstance(rows, list) else []
         rows = self._sanitize_payload(rows)
-        label_distribution = dict(Counter(str(row.get("label", "")) for row in rows if isinstance(row, dict)))
-        high_confidence = [row for row in rows if isinstance(row, dict) and row.get("label") == RESEARCH_LABELS[0]]
+        rows = sorted([row for row in rows if isinstance(row, dict)], key=self._score_sort_key, reverse=True)
+        label_distribution = dict(Counter(str(row.get("label", "")) for row in rows))
+        high_confidence = [row for row in rows if row.get("label") == RESEARCH_LABELS[0]]
         return {
             "ok": True,
             "message": "",
@@ -110,6 +110,76 @@ class OutputLoader:
             "items": rows,
             "label_distribution": label_distribution,
             "high_confidence": high_confidence,
+        }
+
+    def get_candidate_by_symbol(self, symbol: str) -> dict[str, Any]:
+        normalized = self._normalize_symbol(symbol)
+        candidates = self.load_candidates()
+        if not candidates["ok"]:
+            return {
+                "ok": False,
+                "message": candidates["message"],
+                "as_of_date": candidates["as_of_date"],
+                "symbol": normalized,
+                "item": None,
+                "factor_explanations": [],
+                "report": None,
+            }
+        for row in candidates["items"]:
+            if self._normalize_symbol(str(row.get("symbol", ""))) == normalized:
+                return {
+                    "ok": True,
+                    "message": "",
+                    "as_of_date": candidates["as_of_date"],
+                    "symbol": str(row.get("symbol", normalized)),
+                    "item": row,
+                    "factor_explanations": self.get_factor_explanations_by_symbol(normalized)["items"],
+                    "report": self._report_link(self.stock_report_file(normalized)),
+                }
+        return {
+            "ok": False,
+            "message": f"No candidate found for symbol: {normalized}.",
+            "as_of_date": candidates["as_of_date"],
+            "symbol": normalized,
+            "item": None,
+            "factor_explanations": [],
+            "report": self._report_link(self.stock_report_file(normalized)),
+        }
+
+    def load_factor_explanations(self) -> dict[str, Any]:
+        as_of_date = self.latest_daily_date()
+        if not as_of_date:
+            return {"ok": False, "message": NO_DAILY_OUTPUT_MESSAGE, "as_of_date": None, "symbol": None, "count": 0, "items": []}
+        path = self._daily_files(as_of_date)["factor_explanations"]
+        if not path.exists():
+            return {
+                "ok": False,
+                "message": f"Factor explanations output not found for {as_of_date}.",
+                "as_of_date": as_of_date,
+                "symbol": None,
+                "count": 0,
+                "items": [],
+            }
+        payload = self._read_json(path, fallback=[])
+        rows = payload.get("factor_explanations", payload) if isinstance(payload, dict) else payload
+        rows = rows if isinstance(rows, list) else []
+        rows = [row for row in self._sanitize_payload(rows) if isinstance(row, dict)]
+        return {"ok": True, "message": "", "as_of_date": as_of_date, "symbol": None, "count": len(rows), "items": rows}
+
+    def get_factor_explanations_by_symbol(self, symbol: str) -> dict[str, Any]:
+        normalized = self._normalize_symbol(symbol)
+        payload = self.load_factor_explanations()
+        rows = [
+            row for row in payload["items"]
+            if self._normalize_symbol(str(row.get("symbol", ""))) == normalized
+        ]
+        return {
+            "ok": bool(rows) or payload["ok"],
+            "message": "" if rows else ("No factor explanations found for this symbol." if payload["ok"] else payload["message"]),
+            "as_of_date": payload["as_of_date"],
+            "symbol": normalized,
+            "count": len(rows),
+            "items": rows,
         }
 
     def load_summary(self) -> dict[str, Any]:
@@ -130,8 +200,7 @@ class OutputLoader:
             return {"ok": False, "message": "No backtest output found.", "as_of_date": None, "summary": {}, "metrics": {}}
         path = self.backtests_dir / BACKTEST_FILE_PATTERNS["summary"].format(date=as_of_date)
         payload = self._read_json(path, fallback={})
-        summary = payload if isinstance(payload, dict) else {}
-        summary = self._sanitize_payload(summary)
+        summary = self._sanitize_payload(payload if isinstance(payload, dict) else {})
         metrics = summary.get("metrics", {}) if isinstance(summary.get("metrics", {}), dict) else {}
         return {"ok": True, "message": "", "as_of_date": as_of_date, "summary": summary, "metrics": metrics}
 
@@ -143,34 +212,21 @@ class OutputLoader:
             "ok": True,
             "message": "",
             "as_of_date": as_of_date,
-            "daily": self._report_link(self.daily_report(as_of_date), daily=True),
-            "backtest": self._report_link(self.backtest_report(), backtest=True),
-            "stocks": [self._report_link(report) for report in self.stock_reports(as_of_date)],
+            "daily": self._report_link(self.daily_report_file(as_of_date), daily=True),
+            "backtest": self._report_link(self.backtest_report_file(), backtest=True),
+            "stocks": [self._report_link(report) for report in self.get_available_stock_reports(as_of_date)],
         }
 
-    def daily_report(self, as_of_date: str | None = None) -> ReportFile:
-        date = as_of_date or self.latest_daily_date()
-        if not date:
-            return ReportFile(symbol=None, as_of_date=None, markdown_path=None, html_path=None)
-        return ReportFile(
-            symbol=None,
-            as_of_date=date,
-            markdown_path=self.reports_dir / f"daily_report_{date}.md",
-            html_path=self.reports_dir / f"daily_report_{date}.html",
-        )
+    def get_daily_report(self, format: str = "json") -> dict[str, Any]:
+        return self._format_report_content(self.read_report(self.daily_report_file()), format=format)
 
-    def backtest_report(self) -> ReportFile:
-        date = self.latest_backtest_date()
-        if not date:
-            return ReportFile(symbol=None, as_of_date=None, markdown_path=None, html_path=None)
-        return ReportFile(
-            symbol=None,
-            as_of_date=date,
-            markdown_path=self.backtests_dir / BACKTEST_FILE_PATTERNS["markdown"].format(date=date),
-            html_path=self.backtests_dir / BACKTEST_FILE_PATTERNS["html"].format(date=date),
-        )
+    def get_stock_report(self, symbol: str, format: str = "json") -> dict[str, Any]:
+        content = self.read_report(self.stock_report_file(symbol))
+        if not content["ok"]:
+            content["message"] = NO_STOCK_REPORT_MESSAGE
+        return self._format_report_content(content, format=format)
 
-    def stock_reports(self, as_of_date: str | None = None) -> list[ReportFile]:
+    def get_available_stock_reports(self, as_of_date: str | None = None) -> list[ReportFile]:
         date = as_of_date or self.latest_daily_date()
         if not date or not self.stock_reports_dir.exists():
             return []
@@ -186,10 +242,32 @@ class OutputLoader:
             for symbol, paths in sorted(reports.items())
         ]
 
-    def stock_report(self, symbol: str) -> ReportFile:
-        normalized = symbol.strip()
-        for report in self.stock_reports():
-            if report.symbol == normalized:
+    def daily_report_file(self, as_of_date: str | None = None) -> ReportFile:
+        date = as_of_date or self.latest_daily_date()
+        if not date:
+            return ReportFile(symbol=None, as_of_date=None, markdown_path=None, html_path=None)
+        return ReportFile(
+            symbol=None,
+            as_of_date=date,
+            markdown_path=self.reports_dir / f"daily_report_{date}.md",
+            html_path=self.reports_dir / f"daily_report_{date}.html",
+        )
+
+    def backtest_report_file(self) -> ReportFile:
+        date = self.latest_backtest_date()
+        if not date:
+            return ReportFile(symbol=None, as_of_date=None, markdown_path=None, html_path=None)
+        return ReportFile(
+            symbol=None,
+            as_of_date=date,
+            markdown_path=self.backtests_dir / BACKTEST_FILE_PATTERNS["markdown"].format(date=date),
+            html_path=self.backtests_dir / BACKTEST_FILE_PATTERNS["html"].format(date=date),
+        )
+
+    def stock_report_file(self, symbol: str) -> ReportFile:
+        normalized = self._normalize_symbol(symbol)
+        for report in self.get_available_stock_reports():
+            if self._normalize_symbol(report.symbol or "") == normalized:
                 return report
         return ReportFile(symbol=normalized, as_of_date=self.latest_daily_date(), markdown_path=None, html_path=None)
 
@@ -227,8 +305,10 @@ class OutputLoader:
         if not report.as_of_date:
             return None
         route = "/api/reports/daily" if daily else f"/api/reports/stocks/{report.symbol}"
+        page_route = "/reports/daily" if daily else f"/reports/stocks/{report.symbol}"
         if backtest:
             route = None
+            page_route = None
         return {
             "symbol": report.symbol,
             "as_of_date": report.as_of_date,
@@ -236,7 +316,15 @@ class OutputLoader:
             "html_path": str(report.html_path) if report.html_path and report.html_path.exists() else None,
             "markdown_url": f"{route}?format=markdown" if route and report.markdown_path and report.markdown_path.exists() else None,
             "html_url": f"{route}?format=html" if route and report.html_path and report.html_path.exists() else None,
+            "page_url": page_route if page_route and (report.markdown_path or report.html_path) else None,
         }
+
+    def _format_report_content(self, content: dict[str, Any], *, format: str) -> dict[str, Any]:
+        if format == "html":
+            return {**content, "content": content.get("html")}
+        if format == "markdown":
+            return {**content, "content": content.get("markdown")}
+        return content
 
     def _dates_from_files(self, directory: Path, pattern: str) -> set[str]:
         if not directory.exists():
@@ -279,3 +367,12 @@ class OutputLoader:
         for term in PROHIBITED_TERMS:
             sanitized = sanitized.replace(term, PROHIBITED_REPLACEMENT)
         return sanitized
+
+    def _normalize_symbol(self, symbol: str) -> str:
+        return symbol.strip().lower()
+
+    def _score_sort_key(self, row: dict[str, Any]) -> float:
+        try:
+            return float(row.get("total_score", 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0

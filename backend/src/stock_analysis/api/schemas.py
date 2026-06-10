@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 
 NO_DAILY_OUTPUT_MESSAGE = "No daily research output found. Please run run_daily_research.py first."
+NO_STOCK_REPORT_MESSAGE = "No stock report found for this symbol. Please generate research reports first."
 
 
 class ApiMessage(BaseModel):
@@ -28,6 +29,21 @@ class CandidatesResponse(ApiMessage):
     high_confidence: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class CandidateDetailResponse(ApiMessage):
+    as_of_date: str | None = None
+    symbol: str
+    item: dict[str, Any] | None = None
+    factor_explanations: list[dict[str, Any]] = Field(default_factory=list)
+    report: dict[str, Any] | None = None
+
+
+class FactorExplanationsResponse(ApiMessage):
+    as_of_date: str | None = None
+    symbol: str | None = None
+    count: int = 0
+    items: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class SummaryResponse(ApiMessage):
     as_of_date: str | None = None
     summary: dict[str, Any] = Field(default_factory=dict)
@@ -46,6 +62,7 @@ class ReportLink(BaseModel):
     html_path: str | None = None
     markdown_url: str | None = None
     html_url: str | None = None
+    page_url: str | None = None
 
 
 class ReportsResponse(ApiMessage):
