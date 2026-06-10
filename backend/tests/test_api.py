@@ -14,6 +14,7 @@ from stock_analysis.api.app import create_app
 
 
 PROHIBITED_TERMS = ["买入", "卖出", "强烈买入", "建议买入"]
+NAV_LABELS = ["Home", "Compare", "Reports", "Output Health", "Guide", "Daily Report"]
 
 
 class ApiTests(unittest.TestCase):
@@ -199,6 +200,26 @@ class ApiTests(unittest.TestCase):
         self.assertIn("风险提示区", text)
         self.assertIn("回测核心指标", text)
         self.assertIn("仅为个人研究辅助，不构成投资建议", text)
+
+    def test_major_pages_return_200_and_include_global_navigation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            for path in [
+                "/",
+                "/compare",
+                "/reports",
+                "/health/outputs",
+                "/guide",
+                "/stocks/sh.600016",
+                "/reports/daily",
+                "/reports/stocks/sh.600016",
+            ]:
+                response = client.get(path)
+                self.assertEqual(response.status_code, 200, path)
+                for label in NAV_LABELS:
+                    self.assertIn(label, response.text, f"{path} missing {label}")
 
     def test_stock_detail_page_returns_html(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

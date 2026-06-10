@@ -1270,6 +1270,20 @@ def _not_found_html(message: str) -> str:
     return f"<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>Not Found</title></head><body><p>{escape(message)}</p></body></html>"
 
 
+def _global_nav() -> str:
+    links = [
+        ("/", "Home"),
+        ("/compare", "Compare"),
+        ("/reports", "Reports"),
+        ("/health/outputs", "Output Health"),
+        ("/guide", "Guide"),
+        ("/reports/daily", "Daily Report"),
+    ]
+    return "<nav class=\"global-nav\">" + "".join(
+        f"<a href=\"{escape(href)}\">{escape(label)}</a>" for href, label in links
+    ) + "</nav>"
+
+
 def _page_shell(title: str, body: str) -> str:
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -1281,6 +1295,7 @@ def _page_shell(title: str, body: str) -> str:
 </head>
 <body>
   <main class="shell">
+    {_global_nav()}
     {body}
   </main>
 </body>
@@ -1292,6 +1307,8 @@ def _css() -> str:
 :root { color-scheme: light; font-family: Arial, "Microsoft YaHei", sans-serif; color: #17202a; background: #f6f7f9; }
 body { margin: 0; }
 .shell { max-width: 1180px; margin: 0 auto; padding: 28px 20px 48px; }
+.global-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; border-bottom: 1px solid #d9dee7; padding-bottom: 12px; }
+.global-nav a { border: 1px solid #d5deea; border-radius: 999px; padding: 6px 10px; background: #ffffff; color: #24466f; font-size: 13px; }
 .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid #d9dee7; padding-bottom: 18px; }
 h1 { margin: 6px 0 8px; font-size: 30px; font-weight: 700; letter-spacing: 0; }
 h2 { margin: 0 0 14px; font-size: 19px; letter-spacing: 0; }

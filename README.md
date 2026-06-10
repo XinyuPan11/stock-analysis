@@ -93,6 +93,8 @@ Phase 2 Dashboard 页面：
 /reports/stocks/{symbol}  单股报告
 ```
 
+Phase 2 当前是本地只读 Dashboard 阶段性版本：只读取 `outputs/`，不拉数、不重算、不回测。阶段总结见 `PHASE2_SUMMARY.md`。
+
 如果 `outputs/` 下没有每日研究产物，页面和 API 会提示：
 
 ```text
