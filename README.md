@@ -95,6 +95,27 @@ Phase 2 Dashboard 页面：
 
 Phase 2 当前是本地只读 Dashboard 阶段性版本：只读取 `outputs/`，不拉数、不重算、不回测。阶段总结见 `PHASE2_SUMMARY.md`。
 
+## Phase 2.5 一键本地日常流程
+
+Phase 2.5 新增本地 workflow runner，用于按顺序串联缓存预热、每日研究、报告生成、walk-forward 回测和 outputs 健康检查。它仍然只调用本地脚本，不新增数据库、不自动交易、不提供确定性交易建议。
+
+先预览计划：
+
+```powershell
+python backend\scripts\run_daily_workflow.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --limit 50 --top-n 10 --benchmark CSI300 --cache-dir data\cache\daily-use --output-dir outputs --dry-run
+```
+
+正式运行：
+
+```powershell
+python backend\scripts\run_daily_workflow.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --limit 50 --top-n 10 --benchmark CSI300 --cache-dir data\cache\daily-use --output-dir outputs
+```
+
+Workflow 产物：
+
+- `outputs/workflow/workflow_summary_YYYY-MM-DD.json`
+- `outputs/workflow/workflow_log_YYYY-MM-DD.txt`
+
 如果 `outputs/` 下没有每日研究产物，页面和 API 会提示：
 
 ```text

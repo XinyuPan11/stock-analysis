@@ -32,35 +32,103 @@ def get_loader(request: Request) -> OutputLoader:
     return request.app.state.output_loader
 
 
+def _parse_optional_float(value: str | None, field: str) -> tuple[float | None, str]:
+    if value is None or value.strip() == "":
+        return None, ""
+    try:
+        return float(value), ""
+    except ValueError:
+        return None, f"Invalid {field}. It must be a number."
+
+
+def _parse_optional_int(value: str | None, field: str) -> tuple[int | None, str]:
+    if value is None or value.strip() == "":
+        return None, ""
+    try:
+        return int(value), ""
+    except ValueError:
+        return None, f"Invalid {field}. It must be an integer."
+
+
+def _parse_candidate_filter_params(
+    *,
+    min_score: str | None = None,
+    max_score: str | None = None,
+    min_confidence: str | None = None,
+    limit: str | None = None,
+) -> tuple[dict[str, Any], str]:
+    parsed_min_score, error = _parse_optional_float(min_score, "min_score")
+    if error:
+        return {}, error
+    parsed_max_score, error = _parse_optional_float(max_score, "max_score")
+    if error:
+        return {}, error
+    parsed_min_confidence, error = _parse_optional_float(min_confidence, "min_confidence")
+    if error:
+        return {}, error
+    parsed_limit, error = _parse_optional_int(limit, "limit")
+    if error:
+        return {}, error
+    return {
+        "min_score": parsed_min_score,
+        "max_score": parsed_max_score,
+        "min_confidence": parsed_min_confidence,
+        "limit": parsed_limit,
+    }, ""
+
+
+def _empty_filter_error_payload(loader: OutputLoader, message: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "message": message,
+        "as_of_date": loader.latest_daily_date(),
+        "count": 0,
+        "total_count": 0,
+        "filters": {},
+        "items": [],
+        "label_distribution": {},
+        "high_confidence": [],
+    }
+
+
 @router.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
     label: str | None = None,
-    min_score: float | None = None,
-    max_score: float | None = None,
-    min_confidence: float | None = None,
+    min_score: str | None = None,
+    max_score: str | None = None,
+    min_confidence: str | None = None,
     sort_by: str = "total_score",
     sort_order: str = "desc",
-    limit: int | None = None,
+    limit: str | None = None,
 ) -> HTMLResponse:
     loader = get_loader(request)
     latest = loader.latest()
     if not latest["ok"]:
         return HTMLResponse(_empty_dashboard(str(latest["outputs_dir"])))
-
-    candidates = loader.load_candidates(
-        label=label,
+    parsed_filters, filter_error = _parse_candidate_filter_params(
         min_score=min_score,
         max_score=max_score,
         min_confidence=min_confidence,
+        limit=limit,
+    )
+    if filter_error:
+        return HTMLResponse(_message_page("筛选参数错误", filter_error, back_href="/"), status_code=400)
+
+    candidates = loader.load_candidates(
+        label=label,
+        min_score=parsed_filters["min_score"],
+        max_score=parsed_filters["max_score"],
+        min_confidence=parsed_filters["min_confidence"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     summary = loader.load_summary()
     backtest = loader.load_backtest()
     reports = loader.reports()
-    return HTMLResponse(_dashboard_html(latest, candidates, summary, backtest, reports))
+    workflow = loader.get_latest_workflow_summary()
+    return HTMLResponse(_dashboard_html(latest, candidates, summary, backtest, reports, workflow))
 
 
 @router.get("/stocks/{symbol}", response_class=HTMLResponse)
@@ -75,25 +143,28 @@ def stock_detail_page(request: Request, symbol: str) -> HTMLResponse:
 def compare_page(
     request: Request,
     label: str | None = None,
-    min_score: float | None = None,
+    min_score: str | None = None,
     sort_by: str = "total_score",
     sort_order: str = "desc",
-    limit: int | None = None,
+    limit: str | None = None,
 ) -> HTMLResponse:
     loader = get_loader(request)
+    parsed_filters, filter_error = _parse_candidate_filter_params(min_score=min_score, limit=limit)
+    if filter_error:
+        return HTMLResponse(_message_page("筛选参数错误", filter_error, back_href="/compare"), status_code=400)
     compare = loader.get_compare_rows(
         label=label,
-        min_score=min_score,
+        min_score=parsed_filters["min_score"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     factor_matrix = loader.get_factor_group_matrix(
         label=label,
-        min_score=min_score,
+        min_score=parsed_filters["min_score"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     return HTMLResponse(_compare_html(compare, factor_matrix))
 
@@ -150,21 +221,30 @@ def latest(request: Request) -> dict[str, Any]:
 def candidates(
     request: Request,
     label: str | None = None,
-    min_score: float | None = None,
-    max_score: float | None = None,
-    min_confidence: float | None = None,
+    min_score: str | None = None,
+    max_score: str | None = None,
+    min_confidence: str | None = None,
     sort_by: str = "total_score",
     sort_order: str = "desc",
-    limit: int | None = None,
+    limit: str | None = None,
 ) -> Any:
-    payload = get_loader(request).load_candidates(
-        label=label,
+    loader = get_loader(request)
+    parsed_filters, filter_error = _parse_candidate_filter_params(
         min_score=min_score,
         max_score=max_score,
         min_confidence=min_confidence,
+        limit=limit,
+    )
+    if filter_error:
+        return JSONResponse(_empty_filter_error_payload(loader, filter_error), status_code=400)
+    payload = loader.load_candidates(
+        label=label,
+        min_score=parsed_filters["min_score"],
+        max_score=parsed_filters["max_score"],
+        min_confidence=parsed_filters["min_confidence"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     if not payload["ok"] and payload["as_of_date"]:
         return JSONResponse(payload, status_code=400)
@@ -183,17 +263,21 @@ def candidate_detail(request: Request, symbol: str) -> Any:
 def compare_api(
     request: Request,
     label: str | None = None,
-    min_score: float | None = None,
+    min_score: str | None = None,
     sort_by: str = "total_score",
     sort_order: str = "desc",
-    limit: int | None = None,
+    limit: str | None = None,
 ) -> Any:
-    payload = get_loader(request).get_compare_rows(
+    loader = get_loader(request)
+    parsed_filters, filter_error = _parse_candidate_filter_params(min_score=min_score, limit=limit)
+    if filter_error:
+        return JSONResponse(_empty_filter_error_payload(loader, filter_error), status_code=400)
+    payload = loader.get_compare_rows(
         label=label,
-        min_score=min_score,
+        min_score=parsed_filters["min_score"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     if not payload["ok"] and payload["as_of_date"]:
         return JSONResponse(payload, status_code=400)
@@ -225,17 +309,21 @@ def factor_summary_for_symbol(request: Request, symbol: str) -> Any:
 def factor_groups(
     request: Request,
     label: str | None = None,
-    min_score: float | None = None,
+    min_score: str | None = None,
     sort_by: str = "total_score",
     sort_order: str = "desc",
-    limit: int | None = None,
+    limit: str | None = None,
 ) -> Any:
-    payload = get_loader(request).get_factor_group_matrix(
+    loader = get_loader(request)
+    parsed_filters, filter_error = _parse_candidate_filter_params(min_score=min_score, limit=limit)
+    if filter_error:
+        return JSONResponse(_empty_filter_error_payload(loader, filter_error), status_code=400)
+    payload = loader.get_factor_group_matrix(
         label=label,
-        min_score=min_score,
+        min_score=parsed_filters["min_score"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     if not payload["ok"] and payload["as_of_date"]:
         return JSONResponse(payload, status_code=400)
@@ -247,18 +335,22 @@ def factor_group_detail(
     request: Request,
     factor_group: str,
     label: str | None = None,
-    min_score: float | None = None,
+    min_score: str | None = None,
     sort_by: str = "total_score",
     sort_order: str = "desc",
-    limit: int | None = None,
+    limit: str | None = None,
 ) -> Any:
-    payload = get_loader(request).get_factor_group_comparison(
+    loader = get_loader(request)
+    parsed_filters, filter_error = _parse_candidate_filter_params(min_score=min_score, limit=limit)
+    if filter_error:
+        return JSONResponse(_empty_filter_error_payload(loader, filter_error), status_code=400)
+    payload = loader.get_factor_group_comparison(
         factor_group,
         label=label,
-        min_score=min_score,
+        min_score=parsed_filters["min_score"],
         sort_by=sort_by,
         sort_order=sort_order,
-        limit=limit,
+        limit=parsed_filters["limit"],
     )
     if not payload["ok"] and payload["as_of_date"]:
         return JSONResponse(payload, status_code=400)
@@ -358,6 +450,7 @@ def _dashboard_html(
     summary: dict[str, Any],
     backtest: dict[str, Any],
     reports: dict[str, Any],
+    workflow: dict[str, Any],
 ) -> str:
     filters = candidates.get("filters", {})
     default_limit = int(filters.get("limit") or 10)
@@ -392,6 +485,11 @@ def _dashboard_html(
     <section>
       <h2>Pipeline Summary</h2>
       {_summary_grid(summary_payload)}
+    </section>
+
+    <section>
+      <h2>Workflow Summary</h2>
+      {_workflow_summary_panel(workflow)}
     </section>
 
     <section>
@@ -571,6 +669,11 @@ def _output_health_html(health: dict[str, Any], failed: dict[str, Any], quality:
     <section>
       <h2>数据质量检查</h2>
       {_data_quality_panel(quality)}
+    </section>
+
+    <section>
+      <h2>Workflow Summary</h2>
+      {_workflow_summary_panel(health.get("workflow_summary", {}))}
     </section>
 
     <p class="disclaimer">仅为个人研究辅助，不构成投资建议。</p>
@@ -778,6 +881,31 @@ def _summary_grid(summary: dict[str, Any]) -> str:
         for key in keys
     )
     return f"<div class=\"grid\">{cards}</div>"
+
+
+def _workflow_summary_panel(workflow: dict[str, Any]) -> str:
+    if not workflow or not workflow.get("ok"):
+        return "<p class=\"muted\">No workflow summary found. Run run_daily_workflow.py to generate one.</p>"
+    summary = workflow.get("summary") if isinstance(workflow.get("summary"), dict) else {}
+    if not summary:
+        return "<p class=\"muted\">Workflow summary could not be read.</p>"
+    fields = [
+        ("status", summary.get("status", "")),
+        ("end_date", summary.get("end_date", workflow.get("latest_date", ""))),
+        ("elapsed_seconds", summary.get("elapsed_seconds", "")),
+        ("summary_path", summary.get("summary_path", workflow.get("path", ""))),
+        ("log_path", summary.get("log_path", "")),
+        ("dashboard_url", summary.get("dashboard_url", "")),
+    ]
+    cards = "".join(
+        f"<div class=\"metric\"><span>{escape(label)}</span><strong>{escape(str(value or ''))}</strong></div>"
+        for label, value in fields
+    )
+    missing = summary.get("missing_files", [])
+    missing_html = ""
+    if isinstance(missing, list) and missing:
+        missing_html = "<p class=\"notice-text\">missing_files: " + escape(str(len(missing))) + "</p>"
+    return f"<div class=\"grid\">{cards}</div>{missing_html}"
 
 
 def _candidate_table(rows: list[dict[str, Any]]) -> str:
