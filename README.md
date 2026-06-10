@@ -66,6 +66,26 @@ python backend\scripts\run_daily_research.py --provider baostock --start-date 20
 - `outputs/daily/factor_explanations_YYYY-MM-DD.csv`
 - `outputs/daily/factor_explanations_YYYY-MM-DD.json`
 
+## 如何启动 Phase 2 本地 Dashboard
+
+Phase 2 的第一版 Dashboard 只读取已经生成的 `outputs/` 文件，不重新拉取数据、不重新计算因子、不重新跑回测。
+
+```powershell
+python backend\scripts\run_api.py --outputs-dir outputs --host 127.0.0.1 --port 8000
+```
+
+启动后打开：
+
+```text
+http://127.0.0.1:8000
+```
+
+如果 `outputs/` 下没有每日研究产物，页面和 API 会提示：
+
+```text
+No daily research output found. Please run run_daily_research.py first.
+```
+
 ## 如何生成研究报告
 
 ```powershell
