@@ -77,7 +77,8 @@ class CachePrewarmTests(unittest.TestCase):
             self.assertEqual(result.summary["attempted_count"], 3)
             self.assertEqual(result.summary["error_count"], 1)
             self.assertEqual(result.errors.iloc[0]["symbol"], "BBB")
-            self.assertEqual(result.errors.iloc[0]["attempts"], 2)
+            self.assertEqual(result.errors.iloc[0]["attempt_count"], 2)
+            self.assertEqual(result.errors.iloc[0]["error_type"], "non_numeric_market_data")
             self.assertTrue(Path(result.output_paths["summary_json"]).exists())
             self.assertTrue(Path(result.output_paths["errors_csv"]).exists())
 
@@ -122,8 +123,11 @@ class CachePrewarmTests(unittest.TestCase):
             result = run_cache_prewarm(FakePrewarmService(LocalCsvCache(temp_dir)), _config(cache_dir=temp_dir, output_dir=temp_dir))
             required = {
                 "provider",
+                "requested_start_date",
+                "effective_start_date",
                 "start_date",
                 "end_date",
+                "include_lookback_days",
                 "limit",
                 "offset",
                 "batch_size",
@@ -136,8 +140,29 @@ class CachePrewarmTests(unittest.TestCase):
                 "elapsed_seconds",
                 "cache_dir",
                 "errors_path",
+                "error_type_counts",
             }
             self.assertTrue(required.issubset(result.summary))
+
+    def test_include_lookback_days_extends_effective_start_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = run_cache_prewarm(
+                FakePrewarmService(LocalCsvCache(temp_dir)),
+                _config(cache_dir=temp_dir, output_dir=temp_dir, include_lookback_days=120),
+            )
+
+            self.assertEqual(result.summary["requested_start_date"], "2024-01-01")
+            self.assertEqual(result.summary["effective_start_date"], "2023-09-03")
+            self.assertEqual(result.summary["include_lookback_days"], 120)
+
+    def test_error_type_counts_are_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = run_cache_prewarm(
+                FakePrewarmService(LocalCsvCache(temp_dir), failing_symbols={"AAA", "BBB"}),
+                _config(cache_dir=temp_dir, output_dir=temp_dir, limit=2),
+            )
+
+            self.assertEqual(result.summary["error_type_counts"], {"non_numeric_market_data": 2})
 
 
 def _config(
@@ -149,11 +174,14 @@ def _config(
     retry: int = 0,
     resume: bool = False,
     symbols: tuple[str, ...] = (),
+    include_lookback_days: int = 0,
 ) -> CachePrewarmConfig:
     return CachePrewarmConfig(
         provider="unit",
         start_date="2024-01-01",
         end_date="2024-01-05",
+        requested_start_date="2024-01-01",
+        include_lookback_days=include_lookback_days,
         limit=limit,
         offset=offset,
         batch_size=2,

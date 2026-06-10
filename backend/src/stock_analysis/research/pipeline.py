@@ -122,7 +122,7 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
         warnings=list(filter_result.warnings),
     )
     if config.error_output_dir and fetch_errors:
-        output_paths["failed_symbols_csv"] = _write_fetch_errors(fetch_errors, config.error_output_dir, config.end_date)
+        output_paths["failed_symbols_csv"] = _write_fetch_errors(fetch_errors, config.error_output_dir, config)
         summary["output_paths"] = output_paths
     if config.output_dir:
         summary["output_paths"] = output_paths
@@ -249,13 +249,30 @@ def _write_summary(summary: dict[str, object], output_dir: str | Path, as_of_dat
     return str(summary_path.resolve())
 
 
-def _write_fetch_errors(fetch_errors: list[dict[str, str]], output_dir: str | Path, as_of_date: str) -> str:
+def _write_fetch_errors(fetch_errors: list[dict[str, str]], output_dir: str | Path, config: ResearchPipelineConfig) -> str:
     path = Path(output_dir)
     path.mkdir(parents=True, exist_ok=True)
-    safe_date = pd.Timestamp(as_of_date).strftime("%Y-%m-%d")
+    safe_date = pd.Timestamp(config.end_date).strftime("%Y-%m-%d")
     errors_path = path / f"failed_symbols_{safe_date}.csv"
-    pd.DataFrame(fetch_errors).to_csv(errors_path, index=False, encoding="utf-8-sig")
+    rows = [_error_output_row(error, config) for error in fetch_errors]
+    pd.DataFrame(rows).to_csv(errors_path, index=False, encoding="utf-8-sig")
     return str(errors_path.resolve())
+
+
+def _error_output_row(error: dict[str, str], config: ResearchPipelineConfig) -> dict[str, object]:
+    error_type = error.get("error_type") or _classify_error(error.get("error", ""))
+    return {
+        "symbol": error.get("symbol", ""),
+        "name": error.get("name", ""),
+        "error_type": error_type,
+        "error_message": error.get("error", ""),
+        "provider": config.provider,
+        "start_date": pd.Timestamp(config.start_date).strftime("%Y-%m-%d"),
+        "end_date": pd.Timestamp(config.end_date).strftime("%Y-%m-%d"),
+        "attempt_count": error.get("attempts", "1"),
+        "last_attempt_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "can_retry": error_type in {"connection", "timeout", "empty_market_data", "non_numeric_market_data", "provider_error"},
+    }
 
 
 def _summary(
@@ -340,8 +357,12 @@ def _classify_error(error: str) -> str:
     text = str(error).lower()
     if "numeric market data" in text or "non-numeric" in text:
         return "non_numeric_market_data"
+    if "missing_required_columns" in text or "missing provider column" in text:
+        return "missing_required_columns"
+    if "invalid_price_data" in text or "ohlc" in text:
+        return "invalid_price_data"
     if "empty" in text or "no data" in text:
-        return "empty_data"
+        return "empty_market_data"
     if "timeout" in text or "timed out" in text:
         return "timeout"
     if "connection" in text or "reset" in text or "proxy" in text:

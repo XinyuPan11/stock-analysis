@@ -4,6 +4,8 @@ from typing import Mapping
 
 import pandas as pd
 
+from stock_analysis.data.data_cleaning import clean_market_data_frame
+
 
 MARKET_DATA_COLUMNS = [
     "symbol",
@@ -56,14 +58,14 @@ def normalize_market_data_frame(
         provider_column = column_map.get(target_column)
         if provider_column in raw.columns:
             normalized[target_column] = raw[provider_column]
-        elif target_column == "amount" and allow_missing_amount:
-            normalized[target_column] = 0
+        elif target_column in {"amount", "volume"} and (allow_missing_amount or target_column in {"amount", "volume"}):
+            normalized[target_column] = pd.NA
         elif target_column == "adj_close" and "close" in normalized:
             normalized[target_column] = normalized["close"]
         else:
             raise ValueError(f"Missing provider column for {target_column}: {provider_column}")
 
-    return validate_market_data_frame(normalized)
+    return clean_market_data_frame(normalized, source=source, symbol=symbol, allow_missing_liquidity=True)
 
 
 def validate_market_data_frame(frame: pd.DataFrame) -> pd.DataFrame:

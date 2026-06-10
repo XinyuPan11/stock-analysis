@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = ROOT.parent
@@ -34,18 +36,27 @@ def main() -> int:
     parser.add_argument("--max-errors", type=int, default=None)
     parser.add_argument("--retry", type=int, default=0)
     parser.add_argument("--symbols-file", default=None)
+    parser.add_argument("--failed-symbols-file", default=None)
+    parser.add_argument("--retry-only", action="store_true")
+    parser.add_argument("--include-lookback-days", type=int, default=0)
     args = parser.parse_args()
 
     provider = _build_provider(args.provider)
     cache = LocalCsvCache(cache_dir=args.cache_dir)
     service = MarketDataService(provider=provider, cache=cache)
-    symbols = load_symbols_file(args.symbols_file) if args.symbols_file else ()
+    symbols_file = args.failed_symbols_file or args.symbols_file
+    if args.retry_only and not symbols_file:
+        raise ValueError("--retry-only requires --failed-symbols-file or --symbols-file.")
+    symbols = load_symbols_file(symbols_file) if symbols_file else ()
+    effective_start_date = _effective_start_date(args.start_date, args.include_lookback_days)
     result = run_cache_prewarm(
         service,
         CachePrewarmConfig(
             provider=provider.source,
-            start_date=args.start_date,
+            start_date=effective_start_date,
             end_date=args.end_date,
+            requested_start_date=args.start_date,
+            include_lookback_days=args.include_lookback_days,
             limit=args.limit,
             offset=args.offset,
             batch_size=args.batch_size,
@@ -56,6 +67,7 @@ def main() -> int:
             max_errors=args.max_errors,
             retry=args.retry,
             symbols=symbols,
+            retry_only=args.retry_only,
         ),
     )
 
@@ -77,6 +89,15 @@ def _build_provider(name: str) -> MarketDataProvider:
     if name == "tushare":
         return TushareProvider()
     raise ValueError(f"Unsupported provider: {name}")
+
+
+def _effective_start_date(start_date: str, include_lookback_days: int) -> str:
+    if include_lookback_days < 0:
+        raise ValueError("--include-lookback-days cannot be negative.")
+    parsed = pd.to_datetime(start_date, errors="coerce")
+    if pd.isna(parsed):
+        raise ValueError(f"Invalid --start-date: {start_date}")
+    return (parsed - pd.Timedelta(days=include_lookback_days)).strftime("%Y-%m-%d")
 
 
 def _clean(value: Any) -> Any:
