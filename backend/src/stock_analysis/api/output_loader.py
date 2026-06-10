@@ -111,6 +111,10 @@ class OutputLoader:
         dates = self._dates_from_files(self.backtests_dir, r"^backtest_summary_(\d{4}-\d{2}-\d{2})\.json$")
         return max(dates) if dates else None
 
+    def latest_workflow_date(self) -> str | None:
+        dates = self._dates_from_files(self.outputs_dir / "workflow", r"^workflow_summary_(\d{4}-\d{2}-\d{2})\.json$")
+        return max(dates) if dates else None
+
     def latest(self) -> dict[str, Any]:
         as_of_date = self.latest_daily_date()
         files = self._daily_files(as_of_date) if as_of_date else {}
@@ -511,6 +515,7 @@ class OutputLoader:
 
     def get_output_health(self) -> dict[str, Any]:
         latest_date = self.latest_daily_date()
+        workflow_summary = self.get_latest_workflow_summary()
         if not latest_date:
             return {
                 "ok": False,
@@ -523,6 +528,7 @@ class OutputLoader:
                 "data_quality_warnings": [NO_DAILY_OUTPUT_MESSAGE],
                 "blocking_issues": [NO_DAILY_OUTPUT_MESSAGE],
                 "non_blocking_warnings": [],
+                "workflow_summary": workflow_summary,
             }
 
         required_files = self._required_output_files(latest_date)
@@ -559,6 +565,23 @@ class OutputLoader:
             "data_quality_warnings": quality["warnings"],
             "blocking_issues": blocking_issues,
             "non_blocking_warnings": self._non_blocking_warnings(missing_files, missing_stock_reports, failed, quality),
+            "workflow_summary": workflow_summary,
+        }
+
+    def get_latest_workflow_summary(self) -> dict[str, Any]:
+        latest_date = self.latest_workflow_date()
+        if not latest_date:
+            return {"ok": False, "message": "No workflow summary found.", "latest_date": None, "summary": None}
+        path = self.outputs_dir / "workflow" / f"workflow_summary_{latest_date}.json"
+        payload = self._read_json(path, fallback={})
+        if not isinstance(payload, dict):
+            payload = {}
+        return {
+            "ok": bool(payload),
+            "message": "" if payload else "Workflow summary could not be read.",
+            "latest_date": latest_date,
+            "summary": self._sanitize_payload(payload),
+            "path": str(path),
         }
 
     def get_failed_symbols(self) -> dict[str, Any]:
@@ -644,6 +667,9 @@ class OutputLoader:
                 "查看输出健康检查",
             ],
             "commands": {
+                "One-click daily workflow": [
+                    r"python backend\scripts\run_daily_workflow.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --limit 50 --top-n 10 --benchmark CSI300 --cache-dir data\cache\daily-use --output-dir outputs",
+                ],
                 "缓存预热": [
                     '$env:HTTP_PROXY="http://127.0.0.1:8668"',
                     '$env:HTTPS_PROXY="http://127.0.0.1:8668"',
@@ -676,6 +702,8 @@ class OutputLoader:
                 "outputs/backtests/backtest_report_YYYY-MM-DD.md/html",
                 "outputs/cache/cache_prewarm_summary_YYYY-MM-DD.json",
                 "outputs/errors/failed_symbols_YYYY-MM-DD.csv",
+                "outputs/workflow/workflow_summary_YYYY-MM-DD.json",
+                "outputs/workflow/workflow_log_YYYY-MM-DD.txt",
             ],
             "navigation": [
                 {"path": "/", "label": "首页 Dashboard"},
@@ -695,6 +723,7 @@ class OutputLoader:
                 "如果看到 pandas/numexpr warning，当前不影响运行。",
                 "如果 GitHub 网络失败，确认代理 127.0.0.1:8668 可用。",
                 "如果 outputs 健康检查有 missing files，按页面提示补跑对应命令。",
+                "如需本地一键日常流程，先用 run_daily_workflow.py --dry-run 预览，再执行正式 workflow。",
             ],
             "phase_status": [
                 "Phase 1：已完成并合并 main",

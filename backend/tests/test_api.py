@@ -488,6 +488,25 @@ class ApiTests(unittest.TestCase):
         self.assertIn("generate_research_report.py", response.text)
         self.assertIn("run_backtest.py", response.text)
         self.assertIn("run_api.py", response.text)
+        self.assertIn("run_daily_workflow.py", response.text)
+        self.assertIn("data\\cache\\daily-use", response.text)
+
+    def test_home_and_output_health_show_latest_workflow_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            home = client.get("/")
+            health = client.get("/health/outputs")
+            health_api = client.get("/api/output-health")
+
+        self.assertEqual(home.status_code, 200)
+        self.assertEqual(health.status_code, 200)
+        self.assertIn("Workflow Summary", home.text)
+        self.assertIn("workflow_summary_2024-01-31.json", home.text)
+        self.assertIn("Workflow Summary", health.text)
+        self.assertIn("workflow_log_2024-01-31.txt", health.text)
+        self.assertTrue(health_api.json()["workflow_summary"]["ok"])
 
     def test_stock_detail_page_shows_factor_fallback_when_explanations_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -589,11 +608,13 @@ def _write_outputs(root: str) -> None:
     backtests = outputs / "backtests"
     errors = outputs / "errors"
     cache = outputs / "cache"
+    workflow = outputs / "workflow"
     daily.mkdir(parents=True)
     stock_reports.mkdir(parents=True)
     backtests.mkdir(parents=True)
     errors.mkdir(parents=True)
     cache.mkdir(parents=True)
+    workflow.mkdir(parents=True)
 
     candidates = [
         {
@@ -688,6 +709,27 @@ def _write_outputs(root: str) -> None:
         "error_type_counts": {"non_numeric_market_data": 1},
         "warnings": [],
     }
+    workflow_summary = {
+        "status": "ok",
+        "start_time": "2024-02-01T08:00:00",
+        "end_time": "2024-02-01T08:05:00",
+        "elapsed_seconds": 300,
+        "provider": "baostock",
+        "start_date": "2023-01-01",
+        "end_date": "2024-01-31",
+        "benchmark": "CSI300",
+        "limit": 50,
+        "top_n": 10,
+        "steps": [],
+        "step_statuses": {"daily_research": "ok"},
+        "output_files": [],
+        "missing_files": [],
+        "warnings": [],
+        "errors": [],
+        "dashboard_url": "",
+        "summary_path": str(workflow / "workflow_summary_2024-01-31.json"),
+        "log_path": str(workflow / "workflow_log_2024-01-31.txt"),
+    }
     backtest = {
         "as_of_date": "2024-01-31",
         "metrics": {
@@ -723,6 +765,8 @@ def _write_outputs(root: str) -> None:
         encoding="utf-8",
     )
     (cache / "cache_prewarm_summary_2024-01-31.json").write_text(json.dumps(cache_summary, ensure_ascii=False), encoding="utf-8")
+    (workflow / "workflow_summary_2024-01-31.json").write_text(json.dumps(workflow_summary, ensure_ascii=False), encoding="utf-8")
+    (workflow / "workflow_log_2024-01-31.txt").write_text("workflow started\nworkflow status: ok\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

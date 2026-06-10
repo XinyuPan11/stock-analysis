@@ -60,7 +60,8 @@ def dashboard(
     summary = loader.load_summary()
     backtest = loader.load_backtest()
     reports = loader.reports()
-    return HTMLResponse(_dashboard_html(latest, candidates, summary, backtest, reports))
+    workflow = loader.get_latest_workflow_summary()
+    return HTMLResponse(_dashboard_html(latest, candidates, summary, backtest, reports, workflow))
 
 
 @router.get("/stocks/{symbol}", response_class=HTMLResponse)
@@ -358,6 +359,7 @@ def _dashboard_html(
     summary: dict[str, Any],
     backtest: dict[str, Any],
     reports: dict[str, Any],
+    workflow: dict[str, Any],
 ) -> str:
     filters = candidates.get("filters", {})
     default_limit = int(filters.get("limit") or 10)
@@ -392,6 +394,11 @@ def _dashboard_html(
     <section>
       <h2>Pipeline Summary</h2>
       {_summary_grid(summary_payload)}
+    </section>
+
+    <section>
+      <h2>Workflow Summary</h2>
+      {_workflow_summary_panel(workflow)}
     </section>
 
     <section>
@@ -571,6 +578,11 @@ def _output_health_html(health: dict[str, Any], failed: dict[str, Any], quality:
     <section>
       <h2>数据质量检查</h2>
       {_data_quality_panel(quality)}
+    </section>
+
+    <section>
+      <h2>Workflow Summary</h2>
+      {_workflow_summary_panel(health.get("workflow_summary", {}))}
     </section>
 
     <p class="disclaimer">仅为个人研究辅助，不构成投资建议。</p>
@@ -778,6 +790,31 @@ def _summary_grid(summary: dict[str, Any]) -> str:
         for key in keys
     )
     return f"<div class=\"grid\">{cards}</div>"
+
+
+def _workflow_summary_panel(workflow: dict[str, Any]) -> str:
+    if not workflow or not workflow.get("ok"):
+        return "<p class=\"muted\">No workflow summary found. Run run_daily_workflow.py to generate one.</p>"
+    summary = workflow.get("summary") if isinstance(workflow.get("summary"), dict) else {}
+    if not summary:
+        return "<p class=\"muted\">Workflow summary could not be read.</p>"
+    fields = [
+        ("status", summary.get("status", "")),
+        ("end_date", summary.get("end_date", workflow.get("latest_date", ""))),
+        ("elapsed_seconds", summary.get("elapsed_seconds", "")),
+        ("summary_path", summary.get("summary_path", workflow.get("path", ""))),
+        ("log_path", summary.get("log_path", "")),
+        ("dashboard_url", summary.get("dashboard_url", "")),
+    ]
+    cards = "".join(
+        f"<div class=\"metric\"><span>{escape(label)}</span><strong>{escape(str(value or ''))}</strong></div>"
+        for label, value in fields
+    )
+    missing = summary.get("missing_files", [])
+    missing_html = ""
+    if isinstance(missing, list) and missing:
+        missing_html = "<p class=\"notice-text\">missing_files: " + escape(str(len(missing))) + "</p>"
+    return f"<div class=\"grid\">{cards}</div>{missing_html}"
 
 
 def _candidate_table(rows: list[dict[str, Any]]) -> str:
