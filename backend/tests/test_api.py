@@ -188,6 +188,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn("筛选与排序", text)
         self.assertIn("当前筛选条件", text)
         self.assertIn("筛选后候选数量", text)
+        self.assertIn("/compare", text)
+        self.assertIn("查看候选股横向对比", text)
         self.assertIn("/stocks/sh.600016", text)
         self.assertIn("/reports/stocks/sh.600016", text)
         self.assertIn("标签分布", text)
@@ -219,6 +221,102 @@ class ApiTests(unittest.TestCase):
         self.assertIn("单股报告", text)
         self.assertIn("返回首页", text)
         self.assertIn("仅为个人研究辅助，不构成投资建议", text)
+
+    def test_compare_page_returns_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/compare")
+
+        self.assertEqual(response.status_code, 200)
+        text = response.text
+        self.assertIn("候选股横向对比", text)
+        self.assertIn("候选股对比总表", text)
+        self.assertIn("因子组贡献对比表", text)
+        self.assertIn("风险标记对比", text)
+        self.assertIn("主要正向证据对比", text)
+        self.assertIn("研究解释区", text)
+        self.assertIn("/stocks/sh.600016", text)
+        self.assertIn("/reports/stocks/sh.600016", text)
+
+    def test_compare_api_returns_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/compare")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["count"], 2)
+        self.assertIn("research_explanation", payload["items"][0])
+        self.assertIn("/stocks/", payload["items"][0]["detail_link"])
+
+    def test_compare_api_filter_by_label(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/compare", params={"label": "候选关注"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["symbol"], "sh.600015")
+
+    def test_compare_api_sort_by_total_score_desc(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/compare", params={"sort_by": "total_score", "sort_order": "desc"})
+
+        self.assertEqual(response.status_code, 200)
+        scores = [row["total_score"] for row in response.json()["items"]]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
+    def test_factor_groups_matrix_returns_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/factor-groups")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["count"], 2)
+        first = payload["items"][0]
+        self.assertIn("momentum_contribution", first)
+        self.assertIn("trend_contribution", first)
+        self.assertIn("top_positive_factor_group", first)
+
+    def test_factor_group_detail_returns_specific_group(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/factor-groups/trend")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["factor_group"], "trend")
+        self.assertEqual(payload["display_name"], "趋势")
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["items"][0]["factor_group"], "trend")
+
+    def test_compare_page_shows_factor_fallback_when_explanations_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            Path(temp_dir, "daily", "factor_explanations_2024-01-31.json").unlink()
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/compare")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("暂无真实因子贡献表，请先生成 factor_explanations 输出", response.text)
 
     def test_stock_detail_page_shows_factor_fallback_when_explanations_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -279,15 +377,19 @@ class ApiTests(unittest.TestCase):
 
             texts = [
                 client.get("/").text,
+                client.get("/compare").text,
                 client.get("/stocks/sh.600016").text,
                 client.get("/reports/daily").text,
                 client.get("/reports/stocks/sh.600016").text,
                 json.dumps(client.get("/api/latest").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/candidates").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/candidates/sh.600016").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/compare").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/factor-explanations").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/factor-explanations/sh.600016").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/factor-summary/sh.600016").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/factor-groups").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/factor-groups/trend").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/summary").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/backtest").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/reports").json(), ensure_ascii=False),

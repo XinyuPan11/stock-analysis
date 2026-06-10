@@ -53,6 +53,21 @@ FACTOR_GROUP_LABELS = {
     "liquidity": "流动性",
 }
 
+FACTOR_GROUP_ALIASES = {
+    "动量": "momentum",
+    "momentum": "momentum",
+    "趋势": "trend",
+    "trend": "trend",
+    "相对强度": "relative_strength",
+    "relative_strength": "relative_strength",
+    "relative-strength": "relative_strength",
+    "strength": "relative_strength",
+    "风险": "risk",
+    "risk": "risk",
+    "流动性": "liquidity",
+    "liquidity": "liquidity",
+}
+
 NO_FACTOR_EXPLANATIONS_MESSAGE = "暂无真实因子贡献表，请先生成 factor_explanations 输出。"
 
 
@@ -316,6 +331,124 @@ class OutputLoader:
             "explanation": explanation,
         }
 
+    def get_compare_rows(
+        self,
+        *,
+        label: str | None = None,
+        min_score: float | None = None,
+        sort_by: str = "total_score",
+        sort_order: str = "desc",
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        candidates = self.load_candidates(
+            label=label,
+            min_score=min_score,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            limit=limit,
+        )
+        if not candidates["ok"]:
+            return {**candidates, "items": []}
+
+        rows = []
+        for candidate in candidates["items"]:
+            symbol = str(candidate.get("symbol", ""))
+            factor_summary = self.get_factor_summary_by_symbol(symbol)
+            rows.append(
+                {
+                    **candidate,
+                    "detail_link": f"/stocks/{symbol}",
+                    "report_link": f"/reports/stocks/{symbol}",
+                    "research_explanation": factor_summary.get("explanation", NO_FACTOR_EXPLANATIONS_MESSAGE),
+                    "factor_summary": factor_summary,
+                }
+            )
+        return {**candidates, "items": rows}
+
+    def get_factor_group_matrix(
+        self,
+        *,
+        label: str | None = None,
+        min_score: float | None = None,
+        sort_by: str = "total_score",
+        sort_order: str = "desc",
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        compare = self.get_compare_rows(
+            label=label,
+            min_score=min_score,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            limit=limit,
+        )
+        if not compare["ok"]:
+            return {**compare, "factor_group": None, "display_name": None}
+
+        rows = [self._factor_group_matrix_row(row) for row in compare["items"]]
+        return {
+            "ok": True,
+            "message": "",
+            "as_of_date": compare["as_of_date"],
+            "factor_group": None,
+            "display_name": None,
+            "count": len(rows),
+            "filters": compare.get("filters", {}),
+            "items": rows,
+        }
+
+    def get_factor_group_comparison(
+        self,
+        factor_group: str,
+        *,
+        label: str | None = None,
+        min_score: float | None = None,
+        sort_by: str = "total_score",
+        sort_order: str = "desc",
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        group_key = self._normalize_factor_group(factor_group)
+        matrix = self.get_factor_group_matrix(
+            label=label,
+            min_score=min_score,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            limit=limit,
+        )
+        if not matrix["ok"]:
+            return {**matrix, "factor_group": group_key, "display_name": FACTOR_GROUP_LABELS.get(group_key, group_key)}
+
+        contribution_key = f"{group_key}_contribution"
+        score_key = f"{group_key}_normalized_score"
+        rows = []
+        for row in matrix["items"]:
+            rows.append(
+                {
+                    "symbol": row.get("symbol"),
+                    "name": row.get("name"),
+                    "label": row.get("label"),
+                    "total_score": row.get("total_score"),
+                    "factor_group": group_key,
+                    "display_name": FACTOR_GROUP_LABELS.get(group_key, group_key),
+                    "contribution": row.get(contribution_key, 0.0),
+                    "normalized_score": row.get(score_key, 0.0),
+                    "top_positive_factor_group": row.get("top_positive_factor_group", ""),
+                    "top_risk_factor_group": row.get("top_risk_factor_group", ""),
+                    "warning": row.get("factor_warning", ""),
+                    "detail_link": row.get("detail_link"),
+                    "report_link": row.get("report_link"),
+                }
+            )
+        return {
+            "ok": True,
+            "message": "",
+            "as_of_date": matrix["as_of_date"],
+            "factor_group": group_key,
+            "display_name": FACTOR_GROUP_LABELS.get(group_key, group_key),
+            "count": len(rows),
+            "filters": matrix.get("filters", {}),
+            "items": rows,
+        }
+
     def load_summary(self) -> dict[str, Any]:
         as_of_date = self.latest_daily_date()
         if not as_of_date:
@@ -565,6 +698,38 @@ class OutputLoader:
         if "liquidity" in text or "amount" in text or "volume" in text:
             return "liquidity"
         return text or "other"
+
+    def _normalize_factor_group(self, value: str) -> str:
+        text = value.strip()
+        return FACTOR_GROUP_ALIASES.get(text, FACTOR_GROUP_ALIASES.get(text.lower(), text.lower()))
+
+    def _factor_group_matrix_row(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        symbol = str(candidate.get("symbol", ""))
+        summary = candidate.get("factor_summary")
+        if not isinstance(summary, dict):
+            summary = self.get_factor_summary_by_symbol(symbol)
+        groups = {row.get("factor_group"): row for row in summary.get("items", []) if isinstance(row, dict)}
+        row = {
+            "symbol": symbol,
+            "name": candidate.get("name", ""),
+            "label": candidate.get("label", ""),
+            "total_score": candidate.get("total_score", ""),
+            "detail_link": f"/stocks/{symbol}",
+            "report_link": f"/reports/stocks/{symbol}",
+            "factor_warning": "" if summary.get("ok") else NO_FACTOR_EXPLANATIONS_MESSAGE,
+        }
+        for group_key in FACTOR_GROUP_LABELS:
+            group = groups.get(group_key, {})
+            row[f"{group_key}_contribution"] = self._number(group.get("contribution"))
+            row[f"{group_key}_normalized_score"] = self._number(group.get("normalized_score"))
+        positives = summary.get("positive_factors", []) if isinstance(summary.get("positive_factors", []), list) else []
+        risks = summary.get("risk_factors", []) if isinstance(summary.get("risk_factors", []), list) else []
+        row["top_positive_factor_group"] = self._group_display(positives[0]) if positives else ""
+        row["top_risk_factor_group"] = self._group_display(risks[0]) if risks else ""
+        return row
+
+    def _group_display(self, row: dict[str, Any]) -> str:
+        return str(row.get("display_name") or FACTOR_GROUP_LABELS.get(str(row.get("factor_group", "")), row.get("factor_group", "")))
 
     def _score_explanation(self, summaries: list[dict[str, Any]], risks: list[dict[str, Any]]) -> str:
         leaders = [str(row.get("display_name", "")) for row in summaries[:2] if row.get("display_name")]

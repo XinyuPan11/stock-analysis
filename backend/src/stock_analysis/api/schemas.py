@@ -58,6 +58,23 @@ class FactorSummaryResponse(ApiMessage):
     explanation: str = ""
 
 
+class CompareResponse(ApiMessage):
+    as_of_date: str | None = None
+    count: int = 0
+    total_count: int = 0
+    filters: dict[str, Any] = Field(default_factory=dict)
+    items: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class FactorGroupMatrixResponse(ApiMessage):
+    as_of_date: str | None = None
+    factor_group: str | None = None
+    display_name: str | None = None
+    count: int = 0
+    filters: dict[str, Any] = Field(default_factory=dict)
+    items: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class SummaryResponse(ApiMessage):
     as_of_date: str | None = None
     summary: dict[str, Any] = Field(default_factory=dict)

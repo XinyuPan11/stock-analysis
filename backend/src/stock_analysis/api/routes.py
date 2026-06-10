@@ -12,7 +12,9 @@ from stock_analysis.api.schemas import (
     BacktestResponse,
     CandidateDetailResponse,
     CandidatesResponse,
+    CompareResponse,
     FactorExplanationsResponse,
+    FactorGroupMatrixResponse,
     FactorSummaryResponse,
     LatestOutputResponse,
     NO_DAILY_OUTPUT_MESSAGE,
@@ -67,6 +69,33 @@ def stock_detail_page(request: Request, symbol: str) -> HTMLResponse:
     if not detail["ok"]:
         return HTMLResponse(_message_page("候选股详情", detail["message"], back_href="/"), status_code=404)
     return HTMLResponse(_stock_detail_html(detail))
+
+
+@router.get("/compare", response_class=HTMLResponse)
+def compare_page(
+    request: Request,
+    label: str | None = None,
+    min_score: float | None = None,
+    sort_by: str = "total_score",
+    sort_order: str = "desc",
+    limit: int | None = None,
+) -> HTMLResponse:
+    loader = get_loader(request)
+    compare = loader.get_compare_rows(
+        label=label,
+        min_score=min_score,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        limit=limit,
+    )
+    factor_matrix = loader.get_factor_group_matrix(
+        label=label,
+        min_score=min_score,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        limit=limit,
+    )
+    return HTMLResponse(_compare_html(compare, factor_matrix))
 
 
 @router.get("/reports/daily", response_class=HTMLResponse)
@@ -128,6 +157,27 @@ def candidate_detail(request: Request, symbol: str) -> Any:
     return detail
 
 
+@router.get("/api/compare", response_model=CompareResponse)
+def compare_api(
+    request: Request,
+    label: str | None = None,
+    min_score: float | None = None,
+    sort_by: str = "total_score",
+    sort_order: str = "desc",
+    limit: int | None = None,
+) -> Any:
+    payload = get_loader(request).get_compare_rows(
+        label=label,
+        min_score=min_score,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        limit=limit,
+    )
+    if not payload["ok"] and payload["as_of_date"]:
+        return JSONResponse(payload, status_code=400)
+    return payload
+
+
 @router.get("/api/factor-explanations", response_model=FactorExplanationsResponse)
 def factor_explanations(request: Request) -> dict[str, Any]:
     return get_loader(request).load_factor_explanations()
@@ -146,6 +196,50 @@ def factor_summary_for_symbol(request: Request, symbol: str) -> Any:
     payload = get_loader(request).get_factor_summary_by_symbol(symbol)
     if not payload["ok"]:
         return JSONResponse(payload, status_code=404)
+    return payload
+
+
+@router.get("/api/factor-groups", response_model=FactorGroupMatrixResponse)
+def factor_groups(
+    request: Request,
+    label: str | None = None,
+    min_score: float | None = None,
+    sort_by: str = "total_score",
+    sort_order: str = "desc",
+    limit: int | None = None,
+) -> Any:
+    payload = get_loader(request).get_factor_group_matrix(
+        label=label,
+        min_score=min_score,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        limit=limit,
+    )
+    if not payload["ok"] and payload["as_of_date"]:
+        return JSONResponse(payload, status_code=400)
+    return payload
+
+
+@router.get("/api/factor-groups/{factor_group}", response_model=FactorGroupMatrixResponse)
+def factor_group_detail(
+    request: Request,
+    factor_group: str,
+    label: str | None = None,
+    min_score: float | None = None,
+    sort_by: str = "total_score",
+    sort_order: str = "desc",
+    limit: int | None = None,
+) -> Any:
+    payload = get_loader(request).get_factor_group_comparison(
+        factor_group,
+        label=label,
+        min_score=min_score,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        limit=limit,
+    )
+    if not payload["ok"] and payload["as_of_date"]:
+        return JSONResponse(payload, status_code=400)
     return payload
 
 
@@ -239,6 +333,11 @@ def _dashboard_html(
     </header>
 
     <section>
+      <h2>快捷入口</h2>
+      <p><a class="primary-link" href="/compare">查看候选股横向对比</a></p>
+    </section>
+
+    <section>
       <h2>Pipeline Summary</h2>
       {_summary_grid(summary_payload)}
     </section>
@@ -288,6 +387,68 @@ def _dashboard_html(
     <p class="disclaimer">仅为个人研究辅助，不构成投资建议。</p>
     """
     return _page_shell("A 股个人研究终端", body)
+
+
+def _compare_html(compare: dict[str, Any], factor_matrix: dict[str, Any]) -> str:
+    if not compare.get("ok"):
+        body = f"""
+        <header class="topbar">
+          <div>
+            <a href="/" class="back-link">返回首页</a>
+            <h1>候选股横向对比</h1>
+          </div>
+        </header>
+        <section class="notice">
+          <strong>{escape(compare.get("message") or NO_DAILY_OUTPUT_MESSAGE)}</strong>
+        </section>
+        <p class="disclaimer">仅为个人研究辅助，不构成投资建议。</p>
+        """
+        return _page_shell("候选股横向对比", body)
+
+    rows = compare.get("items", [])
+    body = f"""
+    <header class="topbar">
+      <div>
+        <a href="/" class="back-link">返回首页</a>
+        <h1>候选股横向对比</h1>
+        <p>最新数据日期：{escape(str(compare.get("as_of_date") or ""))}</p>
+      </div>
+      <span class="badge">Compare</span>
+    </header>
+
+    <section>
+      <h2>筛选与排序</h2>
+      {_filter_panel(compare.get("filters", {}), compare)}
+    </section>
+
+    <section>
+      <h2>候选股对比总表</h2>
+      {_candidate_table(rows)}
+    </section>
+
+    <section>
+      <h2>因子组贡献对比表</h2>
+      {_factor_group_matrix_table(factor_matrix.get("items", []))}
+    </section>
+
+    <section>
+      <h2>风险标记对比</h2>
+      {_risk_compare_table(rows)}
+    </section>
+
+    <section>
+      <h2>主要正向证据对比</h2>
+      {_positive_evidence_table(rows)}
+    </section>
+
+    <section>
+      <h2>研究解释区</h2>
+      {_research_explanation_list(rows)}
+    </section>
+
+    <p class="disclaimer">仅为个人研究辅助，不构成投资建议。</p>
+    """
+    return _page_shell("候选股横向对比", body)
 
 
 def _stock_detail_html(detail: dict[str, Any]) -> str:
@@ -589,6 +750,72 @@ def _factor_summary_table(summary: dict[str, Any]) -> str:
     return f"<div class=\"table-wrap\"><table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table></div>"
 
 
+def _factor_group_matrix_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "<p class=\"muted\">暂无真实因子贡献表，请先生成 factor_explanations 输出。</p>"
+    columns = [
+        ("symbol", "symbol"),
+        ("name", "name"),
+        ("动量贡献", "momentum_contribution"),
+        ("趋势贡献", "trend_contribution"),
+        ("相对强度贡献", "relative_strength_contribution"),
+        ("风险贡献", "risk_contribution"),
+        ("流动性贡献", "liquidity_contribution"),
+        ("最大正向贡献组", "top_positive_factor_group"),
+        ("主要风险组", "top_risk_factor_group"),
+        ("warning", "factor_warning"),
+    ]
+    header = "".join(f"<th>{escape(label)}</th>" for label, _ in columns)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{escape(_format_metric(row.get(key, '')))}</td>" for _, key in columns) + "</tr>"
+        for row in rows
+    )
+    return f"<div class=\"table-wrap\"><table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table></div>"
+
+
+def _risk_compare_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "<p class=\"muted\">暂无风险对比数据。</p>"
+    columns = ["symbol", "name", "risk_score", "risk_flags", "negative_evidence", "warnings"]
+    header = "".join(f"<th>{escape(column)}</th>" for column in columns)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{escape(_fallback(row.get(column), ''))}</td>" for column in columns) + "</tr>"
+        for row in rows
+    )
+    return f"<div class=\"table-wrap\"><table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table></div>"
+
+
+def _positive_evidence_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "<p class=\"muted\">暂无正向证据对比数据。</p>"
+    columns = ["symbol", "name", "label", "total_score", "positive_evidence", "detail_link", "report_link"]
+    header = "".join(f"<th>{escape(column)}</th>" for column in columns)
+    body_parts = []
+    for row in rows:
+        body_parts.append(
+            "<tr>"
+            f"<td>{escape(str(row.get('symbol', '')))}</td>"
+            f"<td>{escape(str(row.get('name', '')))}</td>"
+            f"<td><span class=\"tag-badge\">{escape(str(row.get('label', '')))}</span></td>"
+            f"<td>{escape(_format_metric(row.get('total_score', '')))}</td>"
+            f"<td>{escape(_fallback(row.get('positive_evidence'), '暂无主要正向证据。'))}</td>"
+            f"<td><a href=\"{escape(str(row.get('detail_link', '#')))}\">详情</a></td>"
+            f"<td><a href=\"{escape(str(row.get('report_link', '#')))}\">报告</a></td>"
+            "</tr>"
+        )
+    return f"<div class=\"table-wrap\"><table><thead><tr>{header}</tr></thead><tbody>{''.join(body_parts)}</tbody></table></div>"
+
+
+def _research_explanation_list(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "<p class=\"muted\">暂无研究解释。</p>"
+    return "<ul class=\"compare-list\">" + "".join(
+        f"<li><strong>{escape(str(row.get('symbol', '')))} {escape(str(row.get('name', '')))}</strong>"
+        f"<p>{escape(_fallback(row.get('research_explanation'), '暂无真实因子贡献表，请先生成 factor_explanations 输出。'))}</p></li>"
+        for row in rows
+    ) + "</ul>"
+
+
 def _factor_cards(rows: list[dict[str, Any]], fallback: str) -> str:
     if not rows:
         return f"<p class=\"muted\">{escape(fallback)}</p>"
@@ -776,6 +1003,8 @@ section { margin-top: 24px; background: #ffffff; border: 1px solid #dde3ec; bord
 .filter-form button { min-height: 36px; border: 1px solid #1f5f99; border-radius: 6px; background: #1f5f99; color: #fff; font: inherit; cursor: pointer; }
 .link-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .link-row a { border: 1px solid #d5deea; border-radius: 999px; padding: 5px 9px; background: #fbfcfe; font-size: 13px; }
+.primary-link { display: inline-block; border: 1px solid #1f5f99; border-radius: 6px; padding: 8px 12px; background: #1f5f99; color: #fff; }
+.primary-link:hover { color: #fff; }
 .notice-text { color: #9a5b00; }
 .metric { border: 1px solid #e0e5ed; border-radius: 8px; padding: 12px; background: #fbfcfe; min-height: 62px; }
 .metric span { display: block; color: #667085; font-size: 12px; margin-bottom: 8px; overflow-wrap: anywhere; }
@@ -787,6 +1016,8 @@ th, td { border-bottom: 1px solid #e4e8ef; padding: 10px 8px; text-align: left; 
 th { color: #455468; background: #f3f5f8; }
 ul { margin: 0; padding-left: 20px; line-height: 1.7; }
 .factor-list { list-style: none; padding-left: 0; display: grid; gap: 10px; }
+.compare-list { list-style: none; padding-left: 0; display: grid; gap: 10px; }
+.compare-list li { border: 1px solid #e0e5ed; border-radius: 8px; padding: 10px; background: #fbfcfe; }
 .factor-list li { border: 1px solid #e0e5ed; border-radius: 8px; padding: 10px; background: #fbfcfe; }
 .factor-list span { display: block; color: #667085; font-size: 12px; margin-top: 4px; }
 .factor-list p { margin: 6px 0 0; }
