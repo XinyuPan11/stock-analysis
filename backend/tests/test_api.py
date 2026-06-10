@@ -318,6 +318,113 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("暂无真实因子贡献表，请先生成 factor_explanations 输出", response.text)
 
+    def test_reports_center_returns_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/reports")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("报告中心", response.text)
+        self.assertIn("每日报告列表", response.text)
+        self.assertIn("单股报告列表", response.text)
+        self.assertIn("回测报告列表", response.text)
+
+    def test_output_health_page_returns_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/health/outputs")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("输出健康检查", response.text)
+        self.assertIn("outputs 完整性检查", response.text)
+        self.assertIn("单股报告覆盖率", response.text)
+        self.assertIn("failed symbols 检查", response.text)
+        self.assertIn("数据质量检查", response.text)
+
+    def test_report_index_api_returns_report_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/report-index")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(len(payload["daily_reports"]), 1)
+        self.assertEqual(len(payload["stock_reports"]), 1)
+        self.assertEqual(len(payload["backtest_reports"]), 1)
+
+    def test_output_health_api_reports_required_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/output-health")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["latest_date"], "2024-01-31")
+        self.assertGreaterEqual(len(payload["required_files"]), 9)
+        self.assertEqual(payload["missing_files"], [])
+        self.assertEqual(payload["report_coverage"]["candidate_count"], 2)
+
+    def test_output_health_api_lists_missing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            Path(temp_dir, "daily", "factors_2024-01-31.json").unlink()
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/output-health")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(any("factors_2024-01-31.json" in path for path in payload["missing_files"]))
+        self.assertIn(payload["status"], {"missing", "warning"})
+
+    def test_failed_symbols_api_reads_csv_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/failed-symbols")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["symbol"], "sh.600006")
+        self.assertEqual(payload["items"][0]["error_type"], "non_numeric_market_data")
+
+    def test_failed_symbols_api_does_not_crash_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            Path(temp_dir, "errors", "failed_symbols_2024-01-31.csv").unlink()
+            Path(temp_dir, "cache", "cache_prewarm_errors_2024-01-31.csv").unlink()
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/failed-symbols")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["items"], [])
+
+    def test_data_quality_api_returns_summary_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/data-quality")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["latest_date"], "2024-01-31")
+        self.assertIn("unit_warning", payload["warnings"])
+        self.assertEqual(payload["fetch_error_count"], 1)
+        self.assertIn("non_numeric_market_data", payload["error_type_counts"])
+
     def test_stock_detail_page_shows_factor_fallback_when_explanations_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             _write_outputs(temp_dir)
@@ -378,6 +485,8 @@ class ApiTests(unittest.TestCase):
             texts = [
                 client.get("/").text,
                 client.get("/compare").text,
+                client.get("/reports").text,
+                client.get("/health/outputs").text,
                 client.get("/stocks/sh.600016").text,
                 client.get("/reports/daily").text,
                 client.get("/reports/stocks/sh.600016").text,
@@ -390,6 +499,10 @@ class ApiTests(unittest.TestCase):
                 json.dumps(client.get("/api/factor-summary/sh.600016").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/factor-groups").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/factor-groups/trend").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/report-index").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/output-health").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/failed-symbols").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/data-quality").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/summary").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/backtest").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/reports").json(), ensure_ascii=False),
@@ -408,9 +521,13 @@ def _write_outputs(root: str) -> None:
     reports = outputs / "reports"
     stock_reports = reports / "stocks"
     backtests = outputs / "backtests"
+    errors = outputs / "errors"
+    cache = outputs / "cache"
     daily.mkdir(parents=True)
     stock_reports.mkdir(parents=True)
     backtests.mkdir(parents=True)
+    errors.mkdir(parents=True)
+    cache.mkdir(parents=True)
 
     candidates = [
         {
@@ -481,6 +598,10 @@ def _write_outputs(root: str) -> None:
             "explanation": "动量表现尚可",
         },
     ]
+    factors = [
+        {"symbol": "sh.600016", "as_of_date": "2024-01-31", "momentum_60d": 0.18},
+        {"symbol": "sh.600015", "as_of_date": "2024-01-31", "momentum_60d": 0.12},
+    ]
     summary = {
         "as_of_date": "2024-01-31",
         "updated_at": "2024-02-01 08:00:00",
@@ -495,6 +616,11 @@ def _write_outputs(root: str) -> None:
         "scored_count": 2,
         "fetch_error_count": 0,
         "warnings": ["unit_warning"],
+    }
+    cache_summary = {
+        "error_count": 1,
+        "error_type_counts": {"non_numeric_market_data": 1},
+        "warnings": [],
     }
     backtest = {
         "as_of_date": "2024-01-31",
@@ -512,6 +638,7 @@ def _write_outputs(root: str) -> None:
 
     (daily / "candidates_2024-01-31.json").write_text(json.dumps(candidates, ensure_ascii=False), encoding="utf-8")
     (daily / "summary_2024-01-31.json").write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+    (daily / "factors_2024-01-31.json").write_text(json.dumps(factors, ensure_ascii=False), encoding="utf-8")
     (daily / "factor_explanations_2024-01-31.json").write_text(json.dumps(factor_explanations, ensure_ascii=False), encoding="utf-8")
     (reports / "daily_report_2024-01-31.md").write_text("# Daily Report\n\n仅用于研究复盘。", encoding="utf-8")
     (reports / "daily_report_2024-01-31.html").write_text("<h1>Daily Report</h1><p>建议买入 会被隐藏</p>", encoding="utf-8")
@@ -520,6 +647,16 @@ def _write_outputs(root: str) -> None:
     (backtests / "backtest_summary_2024-01-31.json").write_text(json.dumps(backtest, ensure_ascii=False), encoding="utf-8")
     (backtests / "backtest_report_2024-01-31.md").write_text("# Backtest", encoding="utf-8")
     (backtests / "backtest_report_2024-01-31.html").write_text("<h1>Backtest</h1>", encoding="utf-8")
+    (errors / "failed_symbols_2024-01-31.csv").write_text(
+        "symbol,stage,error_type,error,attempts\n"
+        "sh.600006,stock_daily,non_numeric_market_data,simulated failure,2\n",
+        encoding="utf-8",
+    )
+    (cache / "cache_prewarm_errors_2024-01-31.csv").write_text(
+        "symbol,name,error_type,error_message,provider,start_date,end_date,attempt_count,last_attempt_at,can_retry\n",
+        encoding="utf-8",
+    )
+    (cache / "cache_prewarm_summary_2024-01-31.json").write_text(json.dumps(cache_summary, ensure_ascii=False), encoding="utf-8")
 
 
 if __name__ == "__main__":

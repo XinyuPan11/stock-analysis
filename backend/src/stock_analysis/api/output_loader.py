@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from collections import Counter
 from dataclasses import dataclass
 import json
@@ -69,6 +70,7 @@ FACTOR_GROUP_ALIASES = {
 }
 
 NO_FACTOR_EXPLANATIONS_MESSAGE = "暂无真实因子贡献表，请先生成 factor_explanations 输出。"
+NO_REPORTS_MESSAGE = "No reports found. Please generate research reports first."
 
 
 @dataclass(frozen=True)
@@ -484,6 +486,152 @@ class OutputLoader:
             "stocks": [self._report_link(report) for report in self.get_available_stock_reports(as_of_date)],
         }
 
+    def get_report_index(self) -> dict[str, Any]:
+        latest_date = self.latest_daily_date()
+        daily_reports = self._report_index_from_directory(
+            self.reports_dir,
+            r"^daily_report_(\d{4}-\d{2}-\d{2})\.(md|html)$",
+            report_type="daily",
+        )
+        stock_reports = self._stock_report_index()
+        backtest_reports = self._report_index_from_directory(
+            self.backtests_dir,
+            r"^backtest_report_(\d{4}-\d{2}-\d{2})\.(md|html)$",
+            report_type="backtest",
+        )
+        found = bool(daily_reports or stock_reports or backtest_reports)
+        return {
+            "ok": found,
+            "message": "" if found else NO_REPORTS_MESSAGE,
+            "latest_date": latest_date,
+            "daily_reports": daily_reports,
+            "stock_reports": stock_reports,
+            "backtest_reports": backtest_reports,
+        }
+
+    def get_output_health(self) -> dict[str, Any]:
+        latest_date = self.latest_daily_date()
+        if not latest_date:
+            return {
+                "ok": False,
+                "latest_date": None,
+                "status": "missing",
+                "required_files": [],
+                "missing_files": [],
+                "report_coverage": {"candidate_count": 0, "stock_report_count": 0, "missing_stock_report_count": 0, "missing_stock_reports": []},
+                "failed_symbols_count": 0,
+                "data_quality_warnings": [NO_DAILY_OUTPUT_MESSAGE],
+                "blocking_issues": [NO_DAILY_OUTPUT_MESSAGE],
+                "non_blocking_warnings": [],
+            }
+
+        required_files = self._required_output_files(latest_date)
+        missing_files = [item["path"] for item in required_files if not item["exists"]]
+        candidates = self.load_candidates()
+        candidate_symbols = [str(row.get("symbol", "")) for row in candidates.get("items", [])]
+        stock_reports = self.get_available_stock_reports(latest_date)
+        stock_report_symbols = {self._normalize_symbol(report.symbol or "") for report in stock_reports if report.html_path or report.markdown_path}
+        missing_stock_reports = [
+            symbol for symbol in candidate_symbols
+            if self._normalize_symbol(symbol) not in stock_report_symbols
+        ]
+        failed = self.get_failed_symbols()
+        quality = self.get_data_quality_summary()
+        blocking_issues = [path for path in missing_files if "\\daily\\" in path or "/daily/" in path]
+        status = "ok"
+        if blocking_issues:
+            status = "missing"
+        elif missing_files or failed["count"] or quality["warnings"]:
+            status = "warning"
+        return {
+            "ok": status != "missing",
+            "latest_date": latest_date,
+            "status": status,
+            "required_files": required_files,
+            "missing_files": missing_files,
+            "report_coverage": {
+                "candidate_count": len(candidate_symbols),
+                "stock_report_count": len(stock_report_symbols),
+                "missing_stock_report_count": len(missing_stock_reports),
+                "missing_stock_reports": missing_stock_reports,
+            },
+            "failed_symbols_count": failed["count"],
+            "data_quality_warnings": quality["warnings"],
+            "blocking_issues": blocking_issues,
+            "non_blocking_warnings": self._non_blocking_warnings(missing_files, missing_stock_reports, failed, quality),
+        }
+
+    def get_failed_symbols(self) -> dict[str, Any]:
+        latest_date = self.latest_daily_date()
+        if not latest_date:
+            return {"ok": True, "latest_date": None, "count": 0, "items": []}
+        files = [
+            ("pipeline", self.outputs_dir / "errors" / f"failed_symbols_{latest_date}.csv"),
+            ("cache_prewarm", self.outputs_dir / "cache" / f"cache_prewarm_errors_{latest_date}.csv"),
+        ]
+        items: list[dict[str, Any]] = []
+        for source, path in files:
+            for row in self._read_csv_rows(path):
+                items.append(
+                    {
+                        "source": source,
+                        "symbol": row.get("symbol", ""),
+                        "name": row.get("name", ""),
+                        "error_type": row.get("error_type", ""),
+                        "error_message": row.get("error_message") or row.get("error", ""),
+                        "can_retry": row.get("can_retry", ""),
+                        "path": str(path),
+                    }
+                )
+        return {"ok": True, "latest_date": latest_date, "count": len(items), "items": self._sanitize_payload(items)}
+
+    def get_data_quality_summary(self) -> dict[str, Any]:
+        latest_date = self.latest_daily_date()
+        if not latest_date:
+            return {
+                "ok": False,
+                "latest_date": None,
+                "fetch_error_count": 0,
+                "error_type_counts": {},
+                "warnings": [NO_DAILY_OUTPUT_MESSAGE],
+                "summary": {},
+            }
+        daily_summary = self.load_summary().get("summary", {})
+        cache_summary = self._read_json(self.outputs_dir / "cache" / f"cache_prewarm_summary_{latest_date}.json", fallback={})
+        error_type_counts: dict[str, Any] = {}
+        for payload in [daily_summary, cache_summary if isinstance(cache_summary, dict) else {}]:
+            counts = payload.get("error_type_counts", {})
+            if isinstance(counts, dict):
+                for key, value in counts.items():
+                    error_type_counts[key] = error_type_counts.get(key, 0) + self._number(value)
+        warnings: list[str] = []
+        for key in ["warnings", "data_quality_warnings"]:
+            value = daily_summary.get(key, [])
+            if isinstance(value, list):
+                warnings.extend(str(item) for item in value)
+        for key in [
+            "listing_date_missing",
+            "missing_liquidity_data",
+            "non_numeric_market_data",
+            "empty_market_data",
+            "missing_required_columns",
+            "invalid_price_data",
+        ]:
+            if key in error_type_counts or key in warnings:
+                warnings.append(key)
+        fetch_error_count = int(self._number(daily_summary.get("fetch_error_count")) + self._number(cache_summary.get("error_count") if isinstance(cache_summary, dict) else 0))
+        return {
+            "ok": True,
+            "latest_date": latest_date,
+            "fetch_error_count": fetch_error_count,
+            "error_type_counts": error_type_counts,
+            "warnings": sorted(set(warnings)),
+            "summary": {
+                "daily": daily_summary,
+                "cache": cache_summary if isinstance(cache_summary, dict) else {},
+            },
+        }
+
     def get_daily_report(self, format: str = "json") -> dict[str, Any]:
         return self._format_report_content(self.read_report(self.daily_report_file()), format=format)
 
@@ -556,6 +704,83 @@ class OutputLoader:
         if not as_of_date:
             return {}
         return {key: self.daily_dir / pattern.format(date=as_of_date) for key, pattern in DAILY_FILE_PATTERNS.items()}
+
+    def _required_output_files(self, as_of_date: str) -> list[dict[str, Any]]:
+        paths = [
+            self.daily_dir / f"candidates_{as_of_date}.json",
+            self.daily_dir / f"summary_{as_of_date}.json",
+            self.daily_dir / f"factors_{as_of_date}.json",
+            self.daily_dir / f"factor_explanations_{as_of_date}.json",
+            self.reports_dir / f"daily_report_{as_of_date}.md",
+            self.reports_dir / f"daily_report_{as_of_date}.html",
+            self.backtests_dir / f"backtest_summary_{as_of_date}.json",
+            self.backtests_dir / f"backtest_report_{as_of_date}.md",
+            self.backtests_dir / f"backtest_report_{as_of_date}.html",
+        ]
+        return [
+            {"path": str(path), "exists": path.exists(), "status": "ok" if path.exists() else "missing"}
+            for path in paths
+        ]
+
+    def _report_index_from_directory(self, directory: Path, pattern: str, *, report_type: str) -> list[dict[str, Any]]:
+        if not directory.exists():
+            return []
+        grouped: dict[str, dict[str, Any]] = {}
+        regex = re.compile(pattern)
+        for path in directory.iterdir():
+            match = regex.match(path.name)
+            if not match:
+                continue
+            date, suffix = match.groups()
+            item = grouped.setdefault(date, {"type": report_type, "as_of_date": date, "markdown_path": None, "html_path": None, "formats": []})
+            item["formats"].append("Markdown" if suffix == "md" else "HTML")
+            item["markdown_path" if suffix == "md" else "html_path"] = str(path)
+        return sorted(grouped.values(), key=lambda item: item["as_of_date"], reverse=True)
+
+    def _stock_report_index(self) -> list[dict[str, Any]]:
+        if not self.stock_reports_dir.exists():
+            return []
+        grouped: dict[tuple[str, str], dict[str, Any]] = {}
+        regex = re.compile(r"^(.+)_(\d{4}-\d{2}-\d{2})\.(md|html)$")
+        for path in self.stock_reports_dir.iterdir():
+            match = regex.match(path.name)
+            if not match:
+                continue
+            symbol, date, suffix = match.groups()
+            item = grouped.setdefault(
+                (symbol, date),
+                {"type": "stock", "symbol": symbol, "as_of_date": date, "markdown_path": None, "html_path": None, "formats": []},
+            )
+            item["formats"].append("Markdown" if suffix == "md" else "HTML")
+            item["markdown_path" if suffix == "md" else "html_path"] = str(path)
+            item["page_url"] = f"/reports/stocks/{symbol}"
+        return sorted(grouped.values(), key=lambda item: (item["as_of_date"], item["symbol"]), reverse=True)
+
+    def _read_csv_rows(self, path: Path) -> list[dict[str, str]]:
+        if not path.exists():
+            return []
+        try:
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                return [dict(row) for row in csv.DictReader(handle)]
+        except OSError:
+            return []
+
+    def _non_blocking_warnings(
+        self,
+        missing_files: list[str],
+        missing_stock_reports: list[str],
+        failed: dict[str, Any],
+        quality: dict[str, Any],
+    ) -> list[str]:
+        warnings: list[str] = []
+        if missing_files:
+            warnings.append(f"missing_files:{len(missing_files)}")
+        if missing_stock_reports:
+            warnings.append(f"missing_stock_reports:{len(missing_stock_reports)}")
+        if failed["count"]:
+            warnings.append(f"failed_symbols:{failed['count']}")
+        warnings.extend(str(item) for item in quality.get("warnings", []))
+        return sorted(set(warnings))
 
     def _empty_candidates(self, *, as_of_date: str | None = None) -> dict[str, Any]:
         return {

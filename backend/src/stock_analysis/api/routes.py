@@ -98,6 +98,23 @@ def compare_page(
     return HTMLResponse(_compare_html(compare, factor_matrix))
 
 
+@router.get("/reports", response_class=HTMLResponse)
+def report_center_page(request: Request) -> HTMLResponse:
+    return HTMLResponse(_report_center_html(get_loader(request).get_report_index()))
+
+
+@router.get("/health/outputs", response_class=HTMLResponse)
+def output_health_page(request: Request) -> HTMLResponse:
+    loader = get_loader(request)
+    return HTMLResponse(
+        _output_health_html(
+            loader.get_output_health(),
+            loader.get_failed_symbols(),
+            loader.get_data_quality_summary(),
+        )
+    )
+
+
 @router.get("/reports/daily", response_class=HTMLResponse)
 def daily_report_page(request: Request) -> HTMLResponse:
     content = get_loader(request).get_daily_report()
@@ -243,6 +260,26 @@ def factor_group_detail(
     return payload
 
 
+@router.get("/api/output-health")
+def output_health(request: Request) -> dict[str, Any]:
+    return get_loader(request).get_output_health()
+
+
+@router.get("/api/report-index")
+def report_index(request: Request) -> dict[str, Any]:
+    return get_loader(request).get_report_index()
+
+
+@router.get("/api/failed-symbols")
+def failed_symbols(request: Request) -> dict[str, Any]:
+    return get_loader(request).get_failed_symbols()
+
+
+@router.get("/api/data-quality")
+def data_quality(request: Request) -> dict[str, Any]:
+    return get_loader(request).get_data_quality_summary()
+
+
 @router.get("/api/summary", response_model=SummaryResponse)
 def summary(request: Request) -> dict[str, Any]:
     return get_loader(request).load_summary()
@@ -334,7 +371,11 @@ def _dashboard_html(
 
     <section>
       <h2>快捷入口</h2>
-      <p><a class="primary-link" href="/compare">查看候选股横向对比</a></p>
+      <div class="entry-row">
+        <a class="primary-link" href="/compare">查看候选股横向对比</a>
+        <a class="primary-link" href="/reports">报告中心</a>
+        <a class="primary-link" href="/health/outputs">输出健康检查</a>
+      </div>
     </section>
 
     <section>
@@ -449,6 +490,81 @@ def _compare_html(compare: dict[str, Any], factor_matrix: dict[str, Any]) -> str
     <p class="disclaimer">仅为个人研究辅助，不构成投资建议。</p>
     """
     return _page_shell("候选股横向对比", body)
+
+
+def _report_center_html(index: dict[str, Any]) -> str:
+    body = f"""
+    <header class="topbar">
+      <div>
+        <a href="/" class="back-link">返回首页</a>
+        <h1>报告中心</h1>
+        <p>最新数据日期：{escape(str(index.get("latest_date") or ""))}</p>
+      </div>
+      <span class="badge">Reports</span>
+    </header>
+
+    {_report_empty_notice(index)}
+
+    <section>
+      <h2>每日报告列表</h2>
+      {_report_index_table(index.get("daily_reports", []), report_kind="daily")}
+    </section>
+
+    <section>
+      <h2>单股报告列表</h2>
+      {_report_index_table(index.get("stock_reports", []), report_kind="stock")}
+    </section>
+
+    <section>
+      <h2>回测报告列表</h2>
+      {_report_index_table(index.get("backtest_reports", []), report_kind="backtest")}
+    </section>
+
+    <p class="disclaimer">仅为个人研究辅助，不构成投资建议。</p>
+    """
+    return _page_shell("报告中心", body)
+
+
+def _output_health_html(health: dict[str, Any], failed: dict[str, Any], quality: dict[str, Any]) -> str:
+    coverage = health.get("report_coverage", {})
+    body = f"""
+    <header class="topbar">
+      <div>
+        <a href="/" class="back-link">返回首页</a>
+        <h1>输出健康检查</h1>
+        <p>最新数据日期：{escape(str(health.get("latest_date") or ""))}</p>
+      </div>
+      <span class="badge">status: {escape(str(health.get("status") or ""))}</span>
+    </header>
+
+    <section>
+      <h2>outputs 完整性检查</h2>
+      {_required_files_table(health.get("required_files", []))}
+    </section>
+
+    <section>
+      <h2>单股报告覆盖率</h2>
+      <div class="grid">
+        <div class="metric"><span>候选股数量</span><strong>{escape(str(coverage.get("candidate_count", 0)))}</strong></div>
+        <div class="metric"><span>已有单股报告</span><strong>{escape(str(coverage.get("stock_report_count", 0)))}</strong></div>
+        <div class="metric"><span>缺失单股报告</span><strong>{escape(str(coverage.get("missing_stock_report_count", 0)))}</strong></div>
+      </div>
+      {_missing_stock_reports(coverage.get("missing_stock_reports", []))}
+    </section>
+
+    <section>
+      <h2>failed symbols 检查</h2>
+      {_failed_symbols_table(failed.get("items", []))}
+    </section>
+
+    <section>
+      <h2>数据质量检查</h2>
+      {_data_quality_panel(quality)}
+    </section>
+
+    <p class="disclaimer">仅为个人研究辅助，不构成投资建议。</p>
+    """
+    return _page_shell("输出健康检查", body)
 
 
 def _stock_detail_html(detail: dict[str, Any]) -> str:
@@ -773,6 +889,98 @@ def _factor_group_matrix_table(rows: list[dict[str, Any]]) -> str:
     return f"<div class=\"table-wrap\"><table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table></div>"
 
 
+def _report_empty_notice(index: dict[str, Any]) -> str:
+    if index.get("ok"):
+        return ""
+    return f"<section class=\"notice\"><strong>{escape(index.get('message') or 'No reports found. Please generate research reports first.')}</strong></section>"
+
+
+def _report_index_table(rows: list[dict[str, Any]], *, report_kind: str) -> str:
+    if not rows:
+        return "<p class=\"muted\">No reports found. Please generate research reports first.</p>"
+    columns = ["as_of_date", "symbol", "formats", "markdown", "html", "page"]
+    header = "".join(f"<th>{escape(column)}</th>" for column in columns)
+    body_parts = []
+    for row in rows:
+        symbol = str(row.get("symbol", ""))
+        page_url = _report_page_url(row, report_kind)
+        page_link = f"<a href=\"{escape(page_url)}\">浏览</a>" if page_url else ""
+        body_parts.append(
+            "<tr>"
+            f"<td>{escape(str(row.get('as_of_date', '')))}</td>"
+            f"<td>{escape(symbol)}</td>"
+            f"<td>{escape(', '.join(row.get('formats', [])))}</td>"
+            f"<td>{_file_link(row.get('markdown_path'), 'Markdown')}</td>"
+            f"<td>{_file_link(row.get('html_path'), 'HTML')}</td>"
+            f"<td>{page_link}</td>"
+            "</tr>"
+        )
+    return f"<div class=\"table-wrap\"><table><thead><tr>{header}</tr></thead><tbody>{''.join(body_parts)}</tbody></table></div>"
+
+
+def _report_page_url(row: dict[str, Any], report_kind: str) -> str:
+    if report_kind == "daily":
+        return "/reports/daily"
+    if report_kind == "stock":
+        return str(row.get("page_url") or "")
+    return ""
+
+
+def _file_link(path: Any, label: str) -> str:
+    if not path:
+        return ""
+    return f"<span title=\"{escape(str(path))}\">{escape(label)}</span>"
+
+
+def _required_files_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "<p class=\"muted\">No daily research output found. Please run run_daily_research.py first.</p>"
+    header = "<th>status</th><th>path</th>"
+    body = "".join(
+        f"<tr><td><span class=\"status {escape(str(row.get('status', '')))}\">{escape(str(row.get('status', '')))}</span></td><td>{escape(str(row.get('path', '')))}</td></tr>"
+        for row in rows
+    )
+    return f"<div class=\"table-wrap\"><table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table></div>"
+
+
+def _missing_stock_reports(symbols: list[str]) -> str:
+    if not symbols:
+        return "<p class=\"muted\">单股报告覆盖完整。</p>"
+    return "<p class=\"muted\">缺失单股报告：" + escape(", ".join(symbols)) + "</p>"
+
+
+def _failed_symbols_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "<p class=\"muted\">暂无 failed symbols 记录。</p>"
+    columns = ["source", "symbol", "name", "error_type", "error_message", "can_retry"]
+    header = "".join(f"<th>{escape(column)}</th>" for column in columns)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{escape(str(row.get(column, '')))}</td>" for column in columns) + "</tr>"
+        for row in rows
+    )
+    return f"<div class=\"table-wrap\"><table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table></div>"
+
+
+def _data_quality_panel(quality: dict[str, Any]) -> str:
+    warnings = quality.get("warnings", [])
+    counts = quality.get("error_type_counts", {})
+    if not warnings and not counts and not quality.get("fetch_error_count"):
+        status_text = "当前 outputs 未发现阻断 Dashboard 展示的严重数据质量问题。"
+    else:
+        status_text = "当前 outputs 存在非阻断 warning，请结合下方字段复核。"
+    counts_text = ", ".join(f"{key}:{value}" for key, value in counts.items()) if isinstance(counts, dict) else ""
+    warning_items = "<ul>" + "".join(f"<li>{escape(str(item))}</li>" for item in warnings) + "</ul>" if warnings else "<p class=\"muted\">暂无 warning。</p>"
+    return f"""
+    <p>{escape(status_text)}</p>
+    <div class="grid">
+      <div class="metric"><span>fetch_error_count</span><strong>{escape(str(quality.get("fetch_error_count", 0)))}</strong></div>
+      <div class="metric"><span>error_type_counts</span><strong>{escape(counts_text or '{}')}</strong></div>
+    </div>
+    <h3>warnings</h3>
+    {warning_items}
+    """
+
+
 def _risk_compare_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return "<p class=\"muted\">暂无风险对比数据。</p>"
@@ -1006,6 +1214,9 @@ section { margin-top: 24px; background: #ffffff; border: 1px solid #dde3ec; bord
 .primary-link { display: inline-block; border: 1px solid #1f5f99; border-radius: 6px; padding: 8px 12px; background: #1f5f99; color: #fff; }
 .primary-link:hover { color: #fff; }
 .notice-text { color: #9a5b00; }
+.status { display: inline-block; border-radius: 999px; padding: 3px 8px; font-size: 12px; border: 1px solid #cfd6e1; }
+.status.ok { color: #17663a; background: #e9f7ef; border-color: #b7e1c8; }
+.status.missing, .status.error { color: #9a3412; background: #fff1e8; border-color: #f3c3a6; }
 .metric { border: 1px solid #e0e5ed; border-radius: 8px; padding: 12px; background: #fbfcfe; min-height: 62px; }
 .metric span { display: block; color: #667085; font-size: 12px; margin-bottom: 8px; overflow-wrap: anywhere; }
 .metric strong { display: block; font-size: 16px; overflow-wrap: anywhere; }
