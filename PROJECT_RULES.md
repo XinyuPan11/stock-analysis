@@ -1,109 +1,69 @@
 # Project Rules
 
-## 1. Product Rule
+## 产品定位
 
-This project is a personal A-share professional research terminal. It is not a public investment advisory product.
+本项目是个人使用的 A 股专业研究终端，不是公开投顾平台，不做订阅、用户体系或公开交易建议。
 
-Do not design Phase 1 around:
+## 市场范围
 
-- public users;
-- paid subscriptions;
-- institutional permission systems;
-- trade execution;
-- public buy/sell advice;
-- real-time tick data;
-- high-cost institutional data sources.
+- 只关注中国 A 股。
+- A 股个股分析为主。
+- CSI300 作为 Phase 1 基准。
+- 后续可扩展中证500、创业板指、科创50、行业指数和 ETF。
 
-## 2. Recommendation Language Rule
+## 数据规则
 
-Allowed labels:
+- 第一版使用 BaoStock、AKShare 等免费/开源数据源。
+- 分析层不得直接依赖 provider 原始字段。
+- 上层只依赖统一 schema。
+- 数据必须缓存，避免重复请求免费接口。
+- 数据错误必须记录，不允许静默吞错。
+- 关键价格字段不可靠时跳过，不硬填假数据。
 
-- `高置信候选`: highest research priority in the current candidate pool; not a trading conclusion.
-- `候选关注`: formal candidate for further research.
-- `重点观察`: has clear strengths but still needs confirmation.
-- `观察`: ordinary tracking, not a core current candidate.
-- `风险过高`: risk is too high for the current candidate pool.
-- `数据不足`: data history or key fields are insufficient for reliable judgment.
+## 输出语言
 
-Avoid deterministic trading advice such as:
+- 默认中文。
+- 后续可增加中英文切换。
 
-- buy now;
-- strong buy;
-- sell immediately;
-- guaranteed upside;
-- must hold;
-- certain target.
+## 推荐标签
 
-Every recommendation must include uncertainty and risk language.
+标签表示研究优先级，不表示交易结论。
 
-## 3. Evidence Rule
+- `高置信候选`：多个信号共振，当前研究优先级最高。
+- `候选关注`：进入正式候选池，值得进一步研究。
+- `重点观察`：有明显亮点，但需要继续确认。
+- `观察`：普通跟踪。
+- `风险过高`：不适合进入当前候选池。
+- `数据不足`：历史或关键字段不足，暂时无法可靠判断。
 
-Every recommendation output must include:
+## 报告规则
 
-- data source;
-- data date;
-- update time;
-- factor evidence;
-- risk counter-evidence;
-- invalidation condition;
-- follow-up indicators.
+报告必须包含：
 
-## 4. Phase Discipline Rule
+- 推荐结论。
+- 核心观点。
+- 关键证据。
+- 因子贡献表。
+- 风险反证。
+- 失效条件。
+- 后续跟踪指标。
+- 数据来源和更新时间。
+- 免责声明。
 
-Phase 1 only implements:
+报告不得写成营销文案，不得使用确定性交易指令。
 
-- data;
-- filters;
-- factors;
-- scoring;
-- explanations;
-- reports;
-- backtesting.
+## 回测规则
 
-Move these to later phases:
+- 必须 walk-forward。
+- 调仓日只能使用当时之前已经存在的数据。
+- 持有期收益从调仓日之后的交易日开始计算。
+- 必须记录交易成本。
+- 必须与基准对比。
+- 回测结果只用于个人研究和模型验证。
 
-- FastAPI dashboard;
-- frontend UI;
-- news and announcements;
-- policy event intelligence;
-- financial deep dive and valuation;
-- watchlist;
-- holdings;
-- reminders and alerts;
-- real-time updates;
-- Wind / Choice / iFinD.
+## Git 规则
 
-## 5. Data Rule
-
-Phase 1 uses daily bars after market close.
-
-Priority data sources:
-
-1. AKShare.
-2. BaoStock.
-3. Tushare Pro, optional.
-
-Do not call provider libraries from analysis code. Analysis code must consume normalized internal schemas only.
-
-## 6. Backtest Rule
-
-Backtests must be walk-forward.
-
-Backtests must not use future data.
-
-Backtest reports must compare against:
-
-- CSI 300;
-- CSI 500;
-- ChiNext Index.
-
-Backtest reports must include:
-
-- cumulative return;
-- annualized return;
-- Alpha;
-- Sharpe;
-- max drawdown;
-- win rate;
-- turnover;
-- post-cost return.
+- 不提交 `data/cache/`。
+- 不提交 `outputs/`。
+- 不提交 `__pycache__/`。
+- 每个阶段提交前运行测试。

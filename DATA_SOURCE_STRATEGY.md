@@ -1,34 +1,12 @@
-# Data Source Strategy: Personal A-Share Daily Research MVP
+# Data Source Strategy
 
-## 1. Core Decision
+## 目标
 
-Phase 1 focuses on daily after-close A-share individual stock research for personal use.
+Phase 1 使用免费/开源数据源做 A 股个人研究 MVP，但架构必须按专业数据源可替换的方式设计。
 
-Market context is allowed, but recommendation targets are restricted:
+## Provider 分层
 
-- Primary analysis target: A-share individual stocks.
-- Core benchmark indices: CSI 300, CSI 500, ChiNext Index, and STAR 50.
-- Background context: industry indices, sector themes, market breadth, turnover, valuation percentile, liquidity, and China-related macro context.
-- Optional later extension: China ETFs.
-- Excluded from Phase 1 recommendations: US stocks, Hong Kong stocks, China ADRs, global equities, futures, options, FX, commodities, and ETFs.
-
-## 2. Phase 1 Data Source Strategy
-
-Phase 1 should use free or open-source data sources for prototype development, while keeping the architecture compatible with professional data vendors later.
-
-Priority:
-
-1. AKShare.
-2. BaoStock.
-3. Tushare Pro as an optional provider.
-
-The data source can be inexpensive during the prototype phase, but the architecture must be professional. The application must not be tightly coupled to a single free interface.
-
-Phase 1 does not integrate Wind, Choice, iFinD, real-time tick feeds, paid news feeds, or institutional data terminals. Those stay in Phase 6.
-
-## 3. Provider Layer Requirements
-
-Data-source calls must live behind a provider layer:
+数据源调用集中在：
 
 ```text
 backend/src/stock_analysis/data/providers/
@@ -38,134 +16,113 @@ backend/src/stock_analysis/data/providers/
   tushare_provider.py
 ```
 
-Rules:
+上层通过 `MarketDataService` 调用，不直接调用 AKShare、BaoStock 或 Tushare。
 
-- Do not call AKShare, BaoStock, or Tushare directly from analysis modules.
-- Do not expose provider-specific column names to reports or future frontend code.
-- Do not let recommendation logic depend on vendor response formats.
-- Provider output must be normalized before storage, analysis, reporting, or backtesting.
-- Future Wind, Choice, or iFinD adapters should be addable without rewriting analysis logic.
+## 统一日线 schema
 
-## 4. Unified DataFrame Schema
+所有日线 provider 输出：
 
-All providers must output this exact market-data DataFrame schema:
-
-| Column | Meaning |
-| --- | --- |
-| `symbol` | Internal stock or index symbol |
-| `trade_date` | Trading date as `YYYY-MM-DD` |
-| `open` | Open price |
-| `high` | High price |
-| `low` | Low price |
-| `close` | Close price |
-| `volume` | Trading volume |
-| `amount` | Trading amount |
-| `adj_close` | Adjusted close price |
-| `source` | Data source name |
-
-Analysis modules must depend only on this schema.
-
-## 5. Phase 1 Data Coverage
-
-Implement first:
-
-- A-share stock universe.
-- A-share individual stock daily bars.
-- CSI 300 index daily bars.
-- CSI 500 index daily bars.
-- ChiNext Index daily bars.
-- STAR 50 index daily bars.
-- Data source, data date, and update time metadata.
-
-Reserve for later:
-
-- Industry indices.
-- ETFs.
-- Financial statement data.
-- Valuation metrics.
-- Announcement and filing data.
-- Wind provider.
-- Choice provider.
-- iFinD provider.
-- Real-time or near-real-time data.
-
-## 6. Local Cache And Incremental Update
-
-Free data interfaces should not be queried repeatedly for the same request.
-
-Requirements:
-
-- Add a local DataFrame cache.
-- Cache by provider, method, symbol/index code, date range, and adjustment flag.
-- Use a TTL so stale prototype data can be refreshed.
-- Keep cache implementation separate from provider implementation.
-- Add an incremental update path for daily after-close data.
-- Do not treat local cache as the final production storage layer.
-
-The current prototype cache is file-based and intended for personal research and development. A database-backed historical store can be added later if Phase 2+ requires it.
-
-## 7. Data Quality Rules
-
-Each normalized provider response should be validated for:
-
-- Required schema columns.
-- Valid trading dates.
-- Numeric OHLCV and amount fields.
-- Non-empty source.
-- Missing values.
-- Sort order.
-- Sufficient history for factor calculation and backtesting.
-
-If minimum data is missing, the recommendation engine should return `数据不足` or `观察`, not a confident candidate label and never deterministic buy/sell advice.
-
-## 8. Phase 1 Filter Data Requirements
-
-Phase 1 filters need enough metadata and daily-bar history to:
-
-- filter ST and *ST stocks;
-- filter delisting-board or delisting-risk stocks;
-- filter stocks listed fewer than 180 days;
-- filter long-suspended stocks;
-- filter stocks with low recent 20-day trading amount;
-- handle limit-up and limit-down edge cases;
-- handle adjusted prices;
-- handle missing data;
-- respect the A-share trading calendar.
-
-If a free provider cannot supply one field reliably, the filter should either use a documented fallback or mark the stock as `数据不足`.
-
-## 9. Current Implementation Status
-
-Already implemented:
-
-- `MarketDataProvider` base interface.
-- `AkShareProvider`.
-- `BaoStockProvider`.
-- `TushareProvider`.
-- Unified schema normalization and validation.
-- File-based local DataFrame cache.
-- `MarketDataService` as the provider-independent access layer.
-- Example analysis module that depends only on the unified schema.
-- Unit tests for schema normalization, cache behavior, and provider-independent analysis.
-- Real-data smoke test CLI: `python backend/scripts/smoke_market_data.py --provider akshare --symbol 000001 --index-code CSI300`.
-- Verified AKShare real-data smoke test for A-share `000001` and `CSI300`.
-- Verified BaoStock real-data smoke test for A-share `sz.000001` and `CSI300`.
-
-Planned next Phase 1 modules are documented in `PHASE1_TASKS.md`.
-
-## 10. Smoke Test Command
-
-Use the local Windows proxy when running network-backed data checks in this environment:
-
-```powershell
-$env:HTTP_PROXY="http://127.0.0.1:8668"
-$env:HTTPS_PROXY="http://127.0.0.1:8668"
-python backend/scripts/smoke_market_data.py --provider akshare --symbol 000001 --index-code CSI300 --start-date 2024-01-01 --end-date 2024-01-31
+```text
+symbol
+trade_date
+open
+high
+low
+close
+volume
+amount
+adj_close
+source
 ```
 
-The command should return JSON containing:
+股票池输出：
 
-- normalized schema columns;
-- A-share stock row count and return summary;
-- benchmark index row count and return summary;
-- local cache directory path.
+```text
+symbol
+name
+exchange
+listing_status
+listing_date
+delisting_date
+is_st
+source
+```
+
+## 当前数据源
+
+### BaoStock
+
+Phase 1 最终 smoke 使用 BaoStock 完成：
+
+- A 股股票池。
+- 个股日线。
+- CSI300 指数日线。
+- 缓存预热。
+- 每日研究 pipeline。
+- walk-forward 回测。
+
+### AKShare
+
+保留为免费数据源之一，可用于后续补充股票池、指数、行业、ETF 或财务估值数据。
+
+### Tushare Pro
+
+当前保留 provider 占位，后续可接入 token 后用于更稳定的数据补充。
+
+## 缓存策略
+
+本地缓存位于 `data/cache/`，不提交到 GitHub。
+
+缓存能力：
+
+- 按 provider、dataset、symbol、adjusted 分目录存储。
+- 每个行情 CSV 配套 coverage JSON。
+- 读取时先检查覆盖区间。
+- 覆盖则直接读缓存。
+- 不覆盖则只补缺失区间。
+
+## 预热策略
+
+使用：
+
+```powershell
+python backend\scripts\prewarm_market_cache.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --include-lookback-days 120 --limit 50 --batch-size 10 --cache-dir data\cache\phase1-final-smoke --output-dir outputs\cache --sleep-seconds 0.5 --retry 1 --resume
+```
+
+预热输出：
+
+- `outputs/cache/cache_prewarm_summary_YYYY-MM-DD.json`
+- `outputs/cache/cache_prewarm_errors_YYYY-MM-DD.csv`
+
+## 数据清洗和错误分类
+
+清洗模块：`backend/src/stock_analysis/data/data_cleaning.py`
+
+错误类型：
+
+- `non_numeric_market_data`：关键价格字段无法转成数值。
+- `empty_market_data`：provider 返回空行情。
+- `missing_required_columns`：缺少关键字段。
+- `invalid_price_data`：OHLC 结构异常。
+- `missing_liquidity_data`：成交额或成交量缺失，作为 warning 处理。
+
+规则：
+
+- 可转换数字字符串会安全转为数值。
+- 缺成交额/成交量可填 0 并记录 warning。
+- 关键价格字段不可靠时跳过，不硬填假数据。
+
+## 后续专业数据源扩展
+
+后续可增加：
+
+- Wind。
+- Choice。
+- iFinD。
+- Tushare Pro 完整接口。
+- 行业指数。
+- ETF。
+- 财务和估值。
+- 公告、新闻、政策事件。
+
+扩展原则：新增 provider 必须输出统一 schema，分析模块不得直接依赖 provider 原始字段。

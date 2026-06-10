@@ -1,45 +1,116 @@
-# Stock Analysis
+# A 股个人研究终端
 
-Personal A-share professional research terminal.
+这是一个个人使用的 A 股专业研究终端 MVP，不是公开投顾系统，也不提供确定性交易指令。Phase 1 已完成本地日线数据、股票池过滤、因子计算、评分排名、研究报告、walk-forward 回测、缓存预热和数据质量处理。
 
-This project is intended to become a personal professional research terminal for daily A-share analysis. The current MVP focuses on after-close daily data, factor scoring, candidate ranking, explanations, reports, and backtesting.
+当前系统默认使用中文输出，面向个人每日收盘后研究。第一版优先使用免费/开源数据源，主要是 BaoStock 和 AKShare；架构上保留 Tushare Pro、Wind、Choice、iFinD 等专业数据源的替换空间。
 
-The product scope is focused on the Chinese stock market. Version 1 should cover mainland China A-shares only, including Shanghai, Shenzhen, and Beijing exchanges.
+## 项目边界
 
-## Current Documents
+- 只关注中国 A 股市场。
+- 第一版只做日线收盘后更新，不做实时 tick 或分钟线。
+- 推荐表达使用研究优先级标签：`高置信候选`、`候选关注`、`重点观察`、`观察`、`风险过高`、`数据不足`。
+- 输出必须包含数据来源、数据日期、更新时间、风险提示和不确定性。
+- 本项目仅用于个人研究辅助，不构成投资建议。
 
-- `PRD.md`: Product requirements document for the first professional MVP.
-- `MVP_ROADMAP.md`: Personal A-share research terminal roadmap and phase boundaries.
-- `PHASE1_TASKS.md`: Phase 1 file structure, implementation order, and completion gate.
-- `PROJECT_RULES.md`: Product, recommendation language, data, and backtest rules.
-- `TECHNICAL_ARCHITECTURE.md`: Technical architecture for frontend, backend, data, recommendations, models, alerts, and bilingual output.
-- `DATA_SOURCE_STRATEGY.md`: Prototype data-source strategy for China A-share data with professional provider abstraction.
-- `SMOKE_TESTS.md`: Recorded verification results for the real-data provider smoke tests.
-- `plan.md`: Full implementation plan for the professional stock recommendation platform.
-- `PRODUCTION_WORKFLOW.md`: Step-by-step production workflow for building the platform from planning to launch.
+## 如何安装依赖
 
-## First Data Smoke Test
+建议在已有 Python 环境中运行：
+
+```powershell
+pip install pandas baostock akshare
+```
+
+如果使用当前 Windows 环境访问外网或 GitHub，请先设置本机代理：
 
 ```powershell
 $env:HTTP_PROXY="http://127.0.0.1:8668"
 $env:HTTPS_PROXY="http://127.0.0.1:8668"
-python backend/scripts/smoke_market_data.py --provider akshare --symbol 000001 --index-code CSI300 --start-date 2024-01-01 --end-date 2024-01-31
 ```
 
-## Initial Direction
+## 如何运行测试
 
-The terminal should not be a simple "stock tip" tool. It should be built as an evidence-backed personal research system:
+```powershell
+python -m unittest discover -s backend\tests
+```
 
-- show real supporting data for every recommendation;
-- use Chinese as the default website language, with Chinese/English switching planned from the beginning;
-- analyze A-share individual stocks first, with CSI 300, CSI 500, ChiNext Index, STAR 50, and industry indices as background benchmarks;
-- start with AKShare and BaoStock prototype data while preserving a replaceable professional data-provider architecture;
-- separate facts, analyst interpretation, and model forecasts;
-- use non-deterministic labels: `候选关注`, `重点观察`, `观察`, `风险过高`;
-- explain each candidate through conclusion, evidence chain, risk counter-evidence, backtest support, and follow-up tracking;
-- track recommendation history and thesis changes;
-- include data source, data date, update time, risk warnings, and uncertainty in every output.
+Phase 1 最终验收结果：`Ran 91 tests ... OK`。
 
-## Important Notice
+## 如何预热缓存
 
-This repository is for personal software product development and research tooling. It is not financial advice and should not present deterministic public buy/sell recommendations.
+建议先预热缓存，再跑研究 pipeline 和回测：
+
+```powershell
+$env:HTTP_PROXY="http://127.0.0.1:8668"
+$env:HTTPS_PROXY="http://127.0.0.1:8668"
+python backend\scripts\prewarm_market_cache.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --include-lookback-days 120 --limit 50 --batch-size 10 --cache-dir data\cache\phase1-final-smoke --output-dir outputs\cache --sleep-seconds 0.5 --retry 1 --resume
+```
+
+预热输出：
+
+- `outputs/cache/cache_prewarm_summary_YYYY-MM-DD.json`
+- `outputs/cache/cache_prewarm_errors_YYYY-MM-DD.csv`
+
+## 如何生成每日候选股
+
+```powershell
+python backend\scripts\run_daily_research.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --benchmark CSI300 --top-n 10 --limit 50 --cache-dir data\cache\phase1-final-smoke --output-dir outputs\daily --retry 1
+```
+
+输出：
+
+- `outputs/daily/candidates_YYYY-MM-DD.csv`
+- `outputs/daily/candidates_YYYY-MM-DD.json`
+- `outputs/daily/summary_YYYY-MM-DD.json`
+- `outputs/daily/factors_YYYY-MM-DD.csv`
+- `outputs/daily/factors_YYYY-MM-DD.json`
+- `outputs/daily/factor_explanations_YYYY-MM-DD.csv`
+- `outputs/daily/factor_explanations_YYYY-MM-DD.json`
+
+## 如何生成研究报告
+
+```powershell
+python backend\scripts\generate_research_report.py --candidates outputs\daily\candidates_2024-01-31.json --summary outputs\daily\summary_2024-01-31.json --factors outputs\daily\factors_2024-01-31.json --factor-explanations outputs\daily\factor_explanations_2024-01-31.json --output-dir outputs\reports --updated-at "2024-02-01 08:00:00"
+```
+
+输出：
+
+- `outputs/reports/daily_report_YYYY-MM-DD.md`
+- `outputs/reports/daily_report_YYYY-MM-DD.html`
+- `outputs/reports/stocks/{symbol}_YYYY-MM-DD.md`
+- `outputs/reports/stocks/{symbol}_YYYY-MM-DD.html`
+
+## 如何运行 walk-forward 回测
+
+```powershell
+python backend\scripts\run_backtest.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --lookback-days 120 --rebalance-frequency monthly --top-n 5 --benchmark CSI300 --limit 50 --cache-dir data\cache\phase1-final-smoke --output-dir outputs\backtests --transaction-cost-bps 10 --retry 1
+```
+
+输出：
+
+- `outputs/backtests/backtest_summary_YYYY-MM-DD.json`
+- `outputs/backtests/backtest_equity_curve_YYYY-MM-DD.csv`
+- `outputs/backtests/backtest_rebalance_log_YYYY-MM-DD.csv`
+- `outputs/backtests/backtest_report_YYYY-MM-DD.md`
+- `outputs/backtests/backtest_report_YYYY-MM-DD.html`
+
+## 什么数据不会提交到 GitHub
+
+以下内容是本地运行产物，不应提交：
+
+- `data/cache/`
+- `outputs/`
+- `__pycache__/`
+- 临时 smoke test 输出
+
+## 主要文档
+
+- `PHASE1_FINAL_REPORT.md`：Phase 1 最终验收报告。
+- `PHASE1_TASKS.md`：Phase 1 完成清单和运行顺序。
+- `PROJECT_RULES.md`：项目边界、标签和输出规则。
+- `DATA_SOURCE_STRATEGY.md`：数据源和缓存策略。
+- `TECHNICAL_ARCHITECTURE.md`：技术架构。
+- `MVP_ROADMAP.md`：个人专业研究终端路线。
+
+## 重要声明
+
+本项目仅为个人研究、模型验证和复盘辅助工具。任何候选标签、评分、回测结果和报告内容都不构成投资建议。

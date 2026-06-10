@@ -1,237 +1,100 @@
-# Phase 1 Tasks: Daily A-Share Research Pipeline
+# Phase 1 Tasks
 
-## 1. Phase 1 Goal
+Phase 1 目标已经完成：形成一个可本地运行、可复现、可解释、可回测的 A 股个人研究 MVP。
 
-Build a local after-close A-share research pipeline that can fetch daily data, filter the stock universe, calculate factors, rank candidates, explain results, run walk-forward backtests, and generate markdown/html research reports.
+## 已完成模块
 
-Phase 1 intentionally does not build the web dashboard, news/event system, watchlist, holdings monitor, or real-time service.
+### 1. 数据层
 
-## 2. Target File Structure
+- A 股股票池获取。
+- 个股日线行情获取。
+- CSI300 指数日线行情获取。
+- Provider 抽象层：AKShare、BaoStock、Tushare Pro 占位。
+- 统一日线 schema：`symbol, trade_date, open, high, low, close, volume, amount, adj_close, source`。
+- 本地 CSV 缓存和 coverage 覆盖判断。
+- 增量更新。
+- 数据清洗和错误分类。
+- 缓存预热、resume、retry、failed symbols 重跑。
 
-```text
-backend/src/stock_analysis/
-  data/
-    providers/
-      base.py
-      akshare_provider.py
-      baostock_provider.py
-      tushare_provider.py
-    cache.py
-    constants.py
-    schemas.py
-    service.py
-    universe.py
+### 2. 过滤层
 
-  research/
-    ashare_filters.py
-    factors.py
-    scoring.py
-    factor_explanation.py
-    signal_conflict_detector.py
-    recommendation_engine.py
-    peer_comparison.py
+- ST、*ST、退市、非正常上市状态过滤。
+- 上市不足 180 天过滤。
+- 长期停牌和数据不足过滤。
+- 近 20 日成交额过低过滤。
+- 缺失数据和价格异常过滤。
+- A 股交易日覆盖检查。
 
-  reports/
-    report_generator.py
-    templates/
+### 3. 因子层
 
-  backtesting/
-    walk_forward.py
-    metrics.py
-    backtest_report.py
+- 动量：20/60/120 日收益率。
+- 趋势：MA5/MA20/MA60、均线站上和多头排列。
+- 相对强度：相对 CSI300 的 20/60/120 日超额收益。
+- 风险：20/60 日波动率、最大回撤、20/60 日最大回撤。
+- 流动性：20/60 日平均成交额和成交量。
 
-  cli/
-    run_daily_research.py
-    run_single_stock_report.py
-    run_backtest.py
+### 4. 评分和解释
 
-backend/tests/
-  test_ashare_filters.py
-  test_factors.py
-  test_scoring.py
-  test_factor_explanation.py
-  test_signal_conflict_detector.py
-  test_report_generator.py
-  test_backtest_report.py
-```
+- 综合评分 100 分制。
+- 子分：动量、趋势、相对强度、风险、流动性。
+- 标签：`高置信候选`、`候选关注`、`重点观察`、`观察`、`风险过高`、`数据不足`。
+- Top N ranking。
+- 因子贡献解释表。
 
-## 3. Implementation Order
+### 5. 研究 pipeline
 
-### Step 1: Data Universe And Daily Bars
+- `run_daily_research.py` 串联股票池、过滤、行情、基准、因子、评分、排名。
+- 支持 `limit`、`offset`、`batch_id`、`retry`。
+- 输出 candidates、summary、factors、factor_explanations。
+- 失败股票输出 failed symbols CSV。
 
-- Add A-share stock universe fetch.
-- Normalize stock identity fields.
-- Fetch daily bars for A-share stocks and benchmark indices.
-- Keep provider output behind the unified schema.
-- Add local cache and incremental update strategy.
-- Add smoke test for one small stock set plus CSI 300.
+### 6. 研究报告
 
-### Step 2: A-Share Filters
+- `generate_research_report.py` 生成每日 Markdown/HTML 报告。
+- 生成单股 Markdown/HTML 报告。
+- 报告读取真实 summary 和真实 factor explanations。
+- 报告包含数据来源、更新时间、风险提示和免责声明。
 
-Implement `ashare_filters.py`:
+### 7. Walk-forward 回测
 
-- Filter ST and *ST stocks.
-- Filter delisting-board or delisting-risk stocks.
-- Filter stocks listed fewer than 180 days.
-- Filter long-suspended stocks.
-- Filter low-liquidity stocks based on recent 20-day trading amount.
-- Handle limit-up/limit-down, adjusted prices, missing data, and trading calendar issues.
+- `run_backtest.py` 支持 monthly/weekly walk-forward。
+- 每个调仓日只使用当时可见历史数据。
+- Top N 等权组合。
+- 支持交易成本。
+- 对比 CSI300。
+- 输出 summary、equity curve、rebalance log、Markdown/HTML 回测报告。
 
-Tests:
+### 8. 批量稳定性
 
-- Synthetic data tests for each filter.
-- Smoke test on a small real-data sample.
+- `prewarm_market_cache.py` 支持批量缓存预热。
+- 支持 resume、retry、failed symbols、symbols-file、include-lookback-days。
+- limit 50 可稳定预热和回测。
+- limit 100 已验证可完成预热。
 
-### Step 3: Factor Calculation
+## Phase 1 运行顺序
 
-Implement `factors.py`:
+1. 运行测试。
+2. 预热缓存。
+3. 运行每日研究 pipeline。
+4. 生成研究报告。
+5. 运行 walk-forward 回测。
+6. 查看 `outputs/` 下的报告和 JSON/CSV。
 
-- Momentum factors.
-- Trend factors.
-- Relative strength versus CSI 300, CSI 500, and ChiNext Index.
-- Volatility and drawdown risk.
-- Liquidity factors.
+## Phase 1 完成门槛
 
-Tests:
+- 全量测试通过。
+- limit 50 真实数据 smoke 通过。
+- 报告不使用确定性交易指令。
+- 所有输出包含数据来源、日期和更新时间。
+- 回测明确禁止未来函数。
+- 缓存和 outputs 不提交到 GitHub。
 
-- Known-input factor tests.
-- Missing-data behavior tests.
+## 后续不在 Phase 1 范围内
 
-### Step 4: Composite Scoring
-
-Implement `scoring.py`:
-
-- Weighted composite score.
-- Percentile rank.
-- Risk penalty.
-- Confidence score.
-- Non-deterministic recommendation label:
-  - `候选关注`
-  - `重点观察`
-  - `观察`
-  - `风险过高`
-
-Tests:
-
-- Ranking test.
-- Risk penalty test.
-- Label threshold test.
-
-### Step 5: Factor Explanation
-
-Implement `factor_explanation.py`:
-
-- Raw factor value.
-- Standardized value.
-- Percentile.
-- Weight.
-- Contribution score.
-- Plain-language explanation.
-
-Tests:
-
-- Contribution sum test.
-- Explanation table schema test.
-
-### Step 6: Signal Conflict Detection
-
-Implement `signal_conflict_detector.py`:
-
-- Momentum strong but valuation/risk expensive later.
-- Industry strong but stock underperforms.
-- Trend strong but volatility too high.
-- Fundamentals good but trend breaks later.
-- Severe conflict reduces confidence and prevents strong candidate wording.
-
-Tests:
-
-- Conflict rule tests.
-- Confidence reduction tests.
-
-### Step 7: Recommendation Engine
-
-Implement `recommendation_engine.py`:
-
-- Combine filters, factors, scoring, explanations, and conflicts.
-- Output Top 10 and Top 20.
-- Include recommendation reason, risk warning, data source, data date, and update time.
-
-Tests:
-
-- End-to-end synthetic pipeline test.
-- Top N output schema test.
-
-### Step 8: Report Generator
-
-Implement `report_generator.py`:
-
-- Daily recommendation report.
-- Single-stock report.
-- Markdown output first.
-- HTML output second.
-
-Report sections:
-
-- Recommendation conclusion.
-- Core view.
-- Key evidence.
-- Factor contribution table.
-- Risk counter-evidence.
-- Signal conflicts.
-- Scenario analysis.
-- Invalidation conditions.
-- Follow-up indicators.
-- Data source and update time.
-
-Tests:
-
-- Markdown content test.
-- No deterministic buy/sell wording test.
-
-### Step 9: Walk-Forward Backtest
-
-Implement `walk_forward.py`, `metrics.py`, and `backtest_report.py`:
-
-- Top 10 and Top 20 portfolio backtests.
-- Walk-forward ranking and holding periods.
-- Compare against CSI 300, CSI 500, and ChiNext Index.
-- Include transaction costs.
-- Forbid future data usage.
-
-Metrics:
-
-- Cumulative return.
-- Annualized return.
-- Alpha.
-- Sharpe.
-- Max drawdown.
-- Win rate.
-- Turnover.
-- Post-cost return.
-
-Tests:
-
-- No future data test.
-- Metrics known-input test.
-- Benchmark comparison test.
-
-## 4. Phase 1 Completion Gate
-
-Phase 1 is not complete unless:
-
-- Every new module has tests or a smoke test.
-- Top 10 and Top 20 candidate reports can be generated.
-- Backtest report can be generated.
-- Every output includes source, data date, update time, and risk warning.
-- No output uses deterministic buy/sell advice wording.
-
-## 5. Current Research Label Levels
-
-The authoritative Phase 1 research labels are:
-
-- `高置信候选`: multiple signals confirm each other and the stock has the highest current research priority. This is not a trading conclusion.
-- `候选关注`: the stock enters the formal candidate pool and deserves further research.
-- `重点观察`: the stock has visible strengths, but some signals still need confirmation.
-- `观察`: ordinary tracking, not a core current candidate.
-- `风险过高`: risk is too high for the current candidate pool.
-- `数据不足`: history or key fields are insufficient for reliable judgment.
+- 前端 dashboard。
+- FastAPI 服务。
+- 财务深度分析。
+- 新闻、公告、政策事件。
+- watchlist 和持仓监控。
+- 实时数据。
+- 复杂机器学习模型。
