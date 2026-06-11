@@ -192,3 +192,113 @@ Keep the same stopping rule: stop if CPU, cache files, and log/output files do n
 - The 43 `empty_market_data` failures should be reviewed before treating full-market cache coverage as complete.
 - The batch runner's JSON, CSV, and log outputs updated at completion.
 - The output file now contains records for both offset 1500 and offset 2000 because resume loaded the previous completed batch record.
+
+## Offset 2500 / Limit 500 Execution
+
+### Command
+
+```powershell
+python backend\scripts\prewarm_full_market_batches.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --include-lookback-days 120 --cache-dir data\cache\daily-use --output-dir outputs\cache --offset 2500 --limit 500 --batch-size 20 --sleep-seconds 0.5 --retry 1 --resume
+```
+
+### Parameters
+
+- Provider: `baostock`
+- Start date: `2023-01-01`
+- End date: `2024-01-31`
+- Effective start date with lookback: `2022-09-03`
+- Include lookback days: `120`
+- Offset: `2500`
+- Limit: `500`
+- Batch size: `20`
+- Retry: `1`
+- Resume: enabled
+- Batch timeout seconds: `1800`
+- Current baseline commit before run: `ebad766 Update full market batch prewarm execution report`
+
+### Batch Result
+
+- Batch status: `warning`
+- Started at: `2026-06-11T13:29:09`
+- Finished at: `2026-06-11T13:55:29`
+- Elapsed seconds: `1579.844`
+- Attempted count: `500`
+- Success count: `474`
+- Failed count: `26`
+- Cache hit count: `0`
+- Skipped count: `0`
+- Last symbol: `sz.002165`
+- Empty market data count: `26`
+- Timeout: no
+- Error summary: `{"empty_market_data": 26}`
+
+This batch did request BaoStock for the whole 500-symbol slice. It completed without timeout and without process stall. The `warning` status is due to 26 `empty_market_data` failures, which should be treated as data-source coverage issues rather than a workflow blocker.
+
+### Failed Symbol Examples
+
+Examples from `outputs/cache/cache_prewarm_errors_2024-01-31.csv` after this batch:
+
+| symbol | name | error_type | can_retry |
+| --- | --- | --- | --- |
+| `sz.001220` | 世盟股份 | `empty_market_data` | `True` |
+| `sz.001221` | 悍高集团 | `empty_market_data` | `True` |
+| `sz.001233` | 海安集团 | `empty_market_data` | `True` |
+| `sz.001237` | 惠康科技 | `empty_market_data` | `True` |
+| `sz.001257` | 盛龙股份 | `empty_market_data` | `True` |
+| `sz.001277` | 速达股份 | `empty_market_data` | `True` |
+| `sz.001279` | 强邦新材 | `empty_market_data` | `True` |
+| `sz.001280` | 中国铀业 | `empty_market_data` | `True` |
+
+### Comparison Across Validated Batches
+
+| Batch | status | attempted | success | failed | empty_market_data | cache_hit | skipped | elapsed_seconds | BaoStock requested |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| offset 1500 / limit 500 | `ok` | 0 | 0 | 0 | 0 | 500 | 500 | 15.703 | no |
+| offset 2000 / limit 500 | `warning` | 314 | 271 | 43 | 43 | 186 | 186 | 1571.297 | yes |
+| offset 2500 / limit 500 | `warning` | 500 | 474 | 26 | 26 | 0 | 0 | 1579.844 | yes |
+
+### Coverage Summary After Offset 2500
+
+- Total symbols in universe observed by runner: `5494`
+- Planned batches in this invocation: `1`
+- Completed batches recorded in batch file: `3`
+- Failed batches recorded in batch file: `0`
+- Full-market prewarm complete: `false`
+- Last completed offset: `2500`
+- Batch runner `next_offset`: `5494`
+
+Note: `next_offset` is `5494` because this invocation was an explicit single-batch run with `--offset 2500 --limit 500`; it should not be interpreted as all later batches being complete.
+
+### Can Continue To Offset 3000 / Limit 500
+
+Yes, it is reasonable to continue to `offset 3000 / limit 500`, with the same monitoring rule.
+
+Rationale:
+
+- The batch did not timeout.
+- The batch made real BaoStock requests for all 500 symbols.
+- Cache files continued updating through completion.
+- The failed count decreased from 43 in the offset 2000 batch to 26 in the offset 2500 batch.
+- All failures were `empty_market_data`, which remains a data coverage risk but is not a prewarm process failure.
+
+Recommended next command:
+
+```powershell
+python backend\scripts\prewarm_full_market_batches.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --include-lookback-days 120 --cache-dir data\cache\daily-use --output-dir outputs\cache --offset 3000 --limit 500 --batch-size 20 --sleep-seconds 0.5 --retry 1 --resume
+```
+
+It is also reasonable to consider an automatic continuous run for remaining batches starting at offset 3000, as long as each batch still writes summary/log output and the run is monitored for stalls:
+
+```powershell
+python backend\scripts\prewarm_full_market_batches.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --include-lookback-days 120 --cache-dir data\cache\daily-use --output-dir outputs\cache --batch-limit 500 --batch-size 20 --sleep-seconds 0.5 --retry 1 --resume --start-offset 3000
+```
+
+For the next step, a single `offset 3000 / limit 500` run is still the more conservative option.
+
+### Risks And Observations
+
+- This batch is the strongest prewarm stability signal so far because every symbol required an attempted fetch.
+- BaoStock remained responsive for the full batch duration.
+- `empty_market_data` remains the main data-quality risk.
+- The 26 failed symbols should be preserved for retry or alternate-provider investigation.
+- No full-market workflow, daily research, or backtest was run.
