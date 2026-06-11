@@ -5,6 +5,7 @@
 - Execution date: 2026-06-11
 - Branch: `phase2-full-market-validation`
 - Baseline commit: `949aa09 Add full market batch prewarm runner`
+- Latest execution-report commit before offset 2000 run: `6927b96 Add full market batch prewarm execution report`
 - Run type: batch prewarm only
 - Full-market workflow run: no
 - Daily research run: no
@@ -91,3 +92,103 @@ The next batch is more likely to exercise real BaoStock fetches because the prev
 - The prior full-market stall risk remains for uncached symbols after the observed cache frontier.
 - The batch runner produced JSON, CSV, and log outputs promptly.
 - No deterministic investment-advice expressions were introduced.
+
+## Offset 2000 / Limit 500 Execution
+
+### Command
+
+```powershell
+python backend\scripts\prewarm_full_market_batches.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --include-lookback-days 120 --cache-dir data\cache\daily-use --output-dir outputs\cache --offset 2000 --limit 500 --batch-size 20 --sleep-seconds 0.5 --retry 1 --resume
+```
+
+### Parameters
+
+- Provider: `baostock`
+- Start date: `2023-01-01`
+- End date: `2024-01-31`
+- Effective start date with lookback: `2022-09-03`
+- Include lookback days: `120`
+- Offset: `2000`
+- Limit: `500`
+- Batch size: `20`
+- Retry: `1`
+- Resume: enabled
+- Batch timeout seconds: `1800`
+
+### Batch Result
+
+- Batch status: `warning`
+- Started at: `2026-06-11T12:53:32`
+- Finished at: `2026-06-11T13:19:43`
+- Elapsed seconds: `1571.297`
+- Attempted count: `314`
+- Success count: `271`
+- Failed count: `43`
+- Cache hit count: `186`
+- Skipped count: `186`
+- Last symbol: `sz.000635`
+- Timeout: no
+- Error summary: `{"empty_market_data": 43}`
+
+This batch did request BaoStock. Unlike the offset 1500 batch, `attempted_count > 0`, so it exercised the previously uncached range. The run completed without timeout, but the batch status is `warning` because BaoStock returned empty market data for 43 symbols.
+
+### Failed Symbol Examples
+
+Examples from `outputs/cache/cache_prewarm_errors_2024-01-31.csv`:
+
+| symbol | name | error_type | can_retry |
+| --- | --- | --- | --- |
+| `sh.688411` | 海博思创 | `empty_market_data` | `True` |
+| `sh.688449` | 联芸科技 | `empty_market_data` | `True` |
+| `sh.688530` | 欧莱新材 | `empty_market_data` | `True` |
+| `sh.688545` | 兴福电子 | `empty_market_data` | `True` |
+| `sh.688583` | 思看科技 | `empty_market_data` | `True` |
+| `sh.688584` | 上海合晶 | `empty_market_data` | `True` |
+| `sh.688605` | 先锋精科 | `empty_market_data` | `True` |
+| `sh.688615` | 合合信息 | `empty_market_data` | `True` |
+
+### Comparison With Offset 1500 / Limit 500
+
+| Batch | status | attempted | success | failed | cache_hit | skipped | elapsed_seconds | BaoStock requested |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| offset 1500 / limit 500 | `ok` | 0 | 0 | 0 | 500 | 500 | 15.703 | no |
+| offset 2000 / limit 500 | `warning` | 314 | 271 | 43 | 186 | 186 | 1571.297 | yes |
+
+### Coverage Summary After Offset 2000
+
+- Total symbols in universe observed by runner: `5494`
+- Planned batches in this invocation: `1`
+- Completed batches recorded in batch file: `2`
+- Failed batches recorded in batch file: `0`
+- Full-market prewarm complete: `false`
+- Last completed offset: `2000`
+- Batch runner `next_offset`: `5494`
+
+Note: `next_offset` is `5494` because this invocation was an explicit single-batch run with `--offset 2000 --limit 500`; it should not be interpreted as all later batches being complete.
+
+### Can Continue To Offset 2500 / Limit 500
+
+Yes, it is reasonable to continue to `offset 2500 / limit 500`, with caution.
+
+Rationale:
+
+- The batch did not timeout.
+- The batch made real BaoStock requests.
+- The process kept writing cache files until completion.
+- The failure rate was non-trivial but all failures were classified as `empty_market_data`, which is retryable and consistent with newly listed or unavailable symbols.
+
+Recommended command:
+
+```powershell
+python backend\scripts\prewarm_full_market_batches.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --include-lookback-days 120 --cache-dir data\cache\daily-use --output-dir outputs\cache --offset 2500 --limit 500 --batch-size 20 --sleep-seconds 0.5 --retry 1 --resume
+```
+
+Keep the same stopping rule: stop if CPU, cache files, and log/output files do not update for more than 30 minutes.
+
+### Risks And Observations
+
+- This batch was the first useful pressure test after the fully cached offset 1500 batch.
+- BaoStock handled 314 attempted symbols and wrote 271 successful caches.
+- The 43 `empty_market_data` failures should be reviewed before treating full-market cache coverage as complete.
+- The batch runner's JSON, CSV, and log outputs updated at completion.
+- The output file now contains records for both offset 1500 and offset 2000 because resume loaded the previous completed batch record.
