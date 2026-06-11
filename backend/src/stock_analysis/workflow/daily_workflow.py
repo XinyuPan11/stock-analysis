@@ -109,6 +109,7 @@ def run_daily_workflow(
         "end_date": config.end_date,
         "benchmark": config.benchmark,
         "limit": config.limit,
+        "full_market": config.limit is None,
         "top_n": config.top_n,
         "steps": steps,
         "step_statuses": {step["name"]: step["status"] for step in steps},

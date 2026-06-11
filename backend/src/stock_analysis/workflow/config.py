@@ -11,7 +11,7 @@ class DailyWorkflowConfig:
     start_date: str = "2023-01-01"
     end_date: str = "2024-01-31"
     benchmark: str = "CSI300"
-    limit: int = 50
+    limit: int | None = None
     top_n: int = 10
     backtest_top_n: int = 5
     lookback_days: int = 120

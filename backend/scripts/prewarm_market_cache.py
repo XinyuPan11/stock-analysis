@@ -21,12 +21,12 @@ from stock_analysis.data.providers import AkShareProvider, BaoStockProvider, Mar
 from stock_analysis.data.service import MarketDataService
 
 
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prewarm local A-share daily market-data cache.")
     parser.add_argument("--provider", choices=["akshare", "baostock", "tushare"], default="baostock")
     parser.add_argument("--start-date", required=True)
     parser.add_argument("--end-date", required=True)
-    parser.add_argument("--limit", type=int, default=50)
+    parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--cache-dir", default=str(REPO_ROOT / "data" / "cache" / "prewarm"))
@@ -39,7 +39,11 @@ def main() -> int:
     parser.add_argument("--failed-symbols-file", default=None)
     parser.add_argument("--retry-only", action="store_true")
     parser.add_argument("--include-lookback-days", type=int, default=0)
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def main() -> int:
+    args = parse_args()
 
     provider = _build_provider(args.provider)
     cache = LocalCsvCache(cache_dir=args.cache_dir)

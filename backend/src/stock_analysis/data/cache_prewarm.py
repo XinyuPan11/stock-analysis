@@ -43,7 +43,7 @@ class CachePrewarmConfig:
     end_date: str
     requested_start_date: str | None = None
     include_lookback_days: int = 0
-    limit: int = 50
+    limit: int | None = None
     offset: int = 0
     batch_size: int = 10
     cache_dir: str | Path = "data/cache"
@@ -113,7 +113,8 @@ def run_cache_prewarm(service: PrewarmMarketDataServiceLike, config: CachePrewar
         "start_date": effective_start,
         "end_date": _date(config.end_date),
         "include_lookback_days": int(config.include_lookback_days),
-        "limit": int(config.limit),
+        "limit": config.limit,
+        "full_market": config.limit is None,
         "offset": int(config.offset),
         "batch_size": int(config.batch_size),
         "total_symbols": int(len(symbol_rows)),
@@ -164,6 +165,8 @@ def _resolve_symbol_rows(service: PrewarmMarketDataServiceLike, config: CachePre
             {"symbol": str(row["symbol"]), "name": str(row.get("name", ""))}
             for _, row in universe.dropna(subset=["symbol"]).iterrows()
         ]
+    if config.limit is None:
+        return source[config.offset :]
     return source[config.offset : config.offset + config.limit]
 
 
@@ -274,7 +277,7 @@ def _effective_start_date(config: CachePrewarmConfig) -> str:
 
 
 def _validate_config(config: CachePrewarmConfig) -> None:
-    if config.limit <= 0:
+    if config.limit is not None and config.limit <= 0:
         raise ValueError("limit must be positive.")
     if config.offset < 0:
         raise ValueError("offset cannot be negative.")

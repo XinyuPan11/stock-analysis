@@ -15,13 +15,13 @@ if str(SRC) not in sys.path:
 from stock_analysis.workflow import DailyWorkflowConfig, run_daily_workflow
 
 
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the local Phase 2.5 daily research workflow.")
     parser.add_argument("--provider", choices=["akshare", "baostock", "tushare"], default="baostock")
     parser.add_argument("--start-date", required=True)
     parser.add_argument("--end-date", required=True)
     parser.add_argument("--benchmark", choices=["CSI300"], default="CSI300")
-    parser.add_argument("--limit", type=int, default=50)
+    parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--top-n", type=int, default=10)
     parser.add_argument("--backtest-top-n", type=int, default=5)
     parser.add_argument("--lookback-days", type=int, default=120)
@@ -44,7 +44,11 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--continue-on-error", action="store_true")
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def main() -> int:
+    args = parse_args()
 
     config = DailyWorkflowConfig(
         repo_root=REPO_ROOT,

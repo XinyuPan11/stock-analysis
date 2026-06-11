@@ -52,7 +52,7 @@ class ResearchPipelineConfig:
     provider: str = ""
     benchmark: str = "CSI300"
     top_n: int = 20
-    limit: int = 20
+    limit: int | None = None
     offset: int = 0
     batch_id: str = ""
     retry: int = 0
@@ -296,7 +296,8 @@ def _summary(
         "start_date": pd.Timestamp(config.start_date).strftime("%Y-%m-%d"),
         "end_date": pd.Timestamp(config.end_date).strftime("%Y-%m-%d"),
         "offset": int(config.offset),
-        "limit": int(config.limit),
+        "limit": config.limit,
+        "full_market": config.limit is None,
         "batch_id": config.batch_id,
         "retry": int(config.retry),
         "universe_count": int(universe_count),
@@ -350,6 +351,8 @@ def _empty_result(universe_count: int, output_dir: str | Path | None, as_of_date
 
 
 def _select_universe_batch(universe: pd.DataFrame, config: ResearchPipelineConfig) -> pd.DataFrame:
+    if config.limit is None:
+        return universe.iloc[config.offset :].reset_index(drop=True)
     return universe.iloc[config.offset : config.offset + config.limit].reset_index(drop=True)
 
 
@@ -373,7 +376,7 @@ def _classify_error(error: str) -> str:
 def _validate_config(config: ResearchPipelineConfig) -> None:
     if config.top_n <= 0:
         raise ValueError("top_n must be positive.")
-    if config.limit <= 0:
+    if config.limit is not None and config.limit <= 0:
         raise ValueError("limit must be positive.")
     if config.offset < 0:
         raise ValueError("offset cannot be negative.")

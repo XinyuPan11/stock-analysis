@@ -21,7 +21,7 @@ from stock_analysis.data.service import MarketDataService
 from stock_analysis.research.pipeline import ResearchPipelineConfig, run_research_pipeline
 
 
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Phase 1 daily A-share research pipeline.")
     parser.add_argument("--provider", choices=["akshare", "baostock", "tushare"], default="baostock")
     parser.add_argument("--start-date", default=None)
@@ -30,14 +30,18 @@ def main() -> int:
     parser.add_argument("--lookback-years", type=int, default=None)
     parser.add_argument("--benchmark", choices=["CSI300"], default="CSI300")
     parser.add_argument("--top-n", type=int, default=20)
-    parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--batch-id", default="")
     parser.add_argument("--retry", type=int, default=0)
     parser.add_argument("--cache-dir", default=str(REPO_ROOT / "data" / "cache" / "daily-research"))
     parser.add_argument("--output-dir", default=str(REPO_ROOT / "outputs" / "daily"))
     parser.add_argument("--error-output-dir", default=str(REPO_ROOT / "outputs" / "errors"))
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def main() -> int:
+    args = parse_args()
 
     start_date = _resolve_start_date(args.start_date, args.end_date, args.lookback_days, args.lookback_years)
     provider = _build_provider(args.provider)

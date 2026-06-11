@@ -64,7 +64,7 @@ class WalkForwardConfig:
     rebalance_frequency: str = "monthly"
     top_n: int = 10
     benchmark: str = "CSI300"
-    limit: int = 50
+    limit: int | None = None
     offset: int = 0
     batch_id: str = ""
     retry: int = 0
@@ -96,7 +96,7 @@ def run_walk_forward_backtest(
     _validate_config(config)
     history_start = _history_start(config.start_date, config.lookback_days)
     full_universe = service.get_stock_universe()
-    universe = full_universe.iloc[config.offset : config.offset + config.limit].reset_index(drop=True)
+    universe = _select_universe_batch(full_universe, config)
     fetch_errors: list[dict[str, str]] = []
     skipped_symbols: list[dict[str, str]] = []
 
@@ -478,7 +478,8 @@ def _summary(
         "start_date": pd.Timestamp(config.start_date).strftime("%Y-%m-%d"),
         "end_date": pd.Timestamp(config.end_date).strftime("%Y-%m-%d"),
         "offset": int(config.offset),
-        "limit": int(config.limit),
+        "limit": config.limit,
+        "full_market": config.limit is None,
         "batch_id": config.batch_id,
         "retry": int(config.retry),
         "universe_count": int(universe_count),
@@ -492,7 +493,8 @@ def _summary(
             "rebalance_frequency": config.rebalance_frequency,
             "top_n": int(config.top_n),
             "benchmark": config.benchmark,
-            "limit": int(config.limit),
+            "limit": config.limit,
+            "full_market": config.limit is None,
             "offset": int(config.offset),
             "batch_id": config.batch_id,
             "retry": int(config.retry),
@@ -550,6 +552,12 @@ def _history_start(start_date: str, lookback_days: int) -> str:
     return (parsed - pd.Timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
 
+def _select_universe_batch(universe: pd.DataFrame, config: WalkForwardConfig) -> pd.DataFrame:
+    if config.limit is None:
+        return universe.iloc[config.offset :].reset_index(drop=True)
+    return universe.iloc[config.offset : config.offset + config.limit].reset_index(drop=True)
+
+
 def _validate_config(config: WalkForwardConfig) -> None:
     start = pd.to_datetime(config.start_date, errors="coerce")
     end = pd.to_datetime(config.end_date, errors="coerce")
@@ -561,7 +569,7 @@ def _validate_config(config: WalkForwardConfig) -> None:
         raise ValueError("lookback_days must be positive.")
     if config.top_n <= 0:
         raise ValueError("top_n must be positive.")
-    if config.limit <= 0:
+    if config.limit is not None and config.limit <= 0:
         raise ValueError("limit must be positive.")
     if config.offset < 0:
         raise ValueError("offset cannot be negative.")
