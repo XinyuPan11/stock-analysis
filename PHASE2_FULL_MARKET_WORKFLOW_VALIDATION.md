@@ -26,6 +26,9 @@ not skip backtest:
 python backend\scripts\run_daily_workflow.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --top-n 150 --backtest-top-n 10 --benchmark CSI300 --cache-dir data\cache\daily-use --output-dir outputs --include-lookback-days 120 --lookback-days 120 --batch-size 20 --sleep-seconds 0.5 --retry 1 --resume --skip-prewarm
 ```
 
+After full-market cache prewarm is complete, this is the canonical full fixed-historical
+workflow command. Running without `--skip-prewarm` may enter redundant prewarm and stall.
+
 ## Data Range
 
 - Start date: `2023-01-01`
@@ -115,6 +118,8 @@ Backtest outputs:
 - `outputs\workflow\workflow_log_2024-01-31.txt`
 - `outputs\workflow\workflow_summary_2024-01-31.json`
 - `outputs\workflow\daily_research_progress_2024-01-31.log`
+- `outputs\workflow\backtest_progress_2024-01-31.log` after the backtest progress
+  diagnostics change
 - `outputs\workflow\full_workflow_skip_prewarm_stdout_2024-01-31_20260614_200407.txt`
 - `outputs\workflow\full_workflow_skip_prewarm_stderr_2024-01-31_20260614_200407.txt`
 
@@ -123,7 +128,8 @@ Backtest outputs:
 - Running the full workflow without `--skip-prewarm` can still stall in the redundant
   prewarm step even after the fixed historical full-market cache has already been
   prepared.
-- Backtest is now the longest completed stage and lacks detailed mid-step progress logs.
+- Backtest is now the longest completed stage. Backtest progress diagnostics were added
+  after this validation run so future runs can show mid-step progress.
 - `fetch_error_count` remains `190` for the fixed historical full-market run.
 - Backtest warnings include monthly `listing_date_missing` entries.
 - Recursive listing of all `outputs` can be slow because the report directory contains
@@ -144,6 +150,6 @@ validation branch.
 
 ## Recommended Next Step
 
-Stay in Phase 2.6. Add minimal backtest progress diagnostics before attempting additional
-full-market validation runs, because the complete workflow now shows backtest as the
-dominant long-running black-box step.
+Stay in Phase 2.6. Use the canonical `--skip-prewarm` full fixed-historical workflow
+command for future validation runs. If another full run is needed, inspect
+`outputs\workflow\backtest_progress_2024-01-31.log` while the backtest step is active.

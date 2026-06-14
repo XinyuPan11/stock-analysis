@@ -162,6 +162,10 @@ def backtest_step(config: DailyWorkflowConfig) -> WorkflowStep:
         str(config.transaction_cost_bps),
         "--retry",
         str(config.retry),
+        "--progress-log",
+        str(config.workflow_output_dir / f"backtest_progress_{date}.log"),
+        "--progress-every",
+        "100",
     ]
     _append_limit(command, config.limit)
     return WorkflowStep(
