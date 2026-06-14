@@ -157,6 +157,30 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertEqual(result.summary["filtered_count"], 2)
         self.assertEqual(result.summary["successful_factor_count"], 0)
 
+    def test_pipeline_writes_progress_log_for_major_stages(self) -> None:
+        service = _service()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            progress_log = Path(temp_dir, "daily_research_progress.log")
+
+            run_research_pipeline(
+                service,
+                _config(limit=3, output_dir=temp_dir, progress_log_path=progress_log, progress_every=1),
+            )
+
+            log_text = progress_log.read_text(encoding="utf-8")
+
+        self.assertIn("stock universe loaded", log_text)
+        self.assertIn("cache coverage / loading start", log_text)
+        self.assertIn("stock daily progress", log_text)
+        self.assertIn("filtering end", log_text)
+        self.assertIn("factor calculation start", log_text)
+        self.assertIn("factor calculation end", log_text)
+        self.assertIn("scoring start", log_text)
+        self.assertIn("scoring end", log_text)
+        self.assertIn("top N candidate generation", log_text)
+        self.assertIn("output writing start", log_text)
+        self.assertIn("output writing end", log_text)
+
 
 def _config(
     top_n: int = 2,
@@ -165,6 +189,8 @@ def _config(
     retry: int = 0,
     output_dir: str | None = None,
     error_output_dir: str | None = None,
+    progress_log_path: str | Path | None = None,
+    progress_every: int = 100,
 ) -> ResearchPipelineConfig:
     return ResearchPipelineConfig(
         start_date="2023-01-01",
@@ -177,6 +203,8 @@ def _config(
         retry=retry,
         output_dir=output_dir,
         error_output_dir=error_output_dir,
+        progress_log_path=progress_log_path,
+        progress_every=progress_every,
     )
 
 

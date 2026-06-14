@@ -37,6 +37,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cache-dir", default=str(REPO_ROOT / "data" / "cache" / "daily-research"))
     parser.add_argument("--output-dir", default=str(REPO_ROOT / "outputs" / "daily"))
     parser.add_argument("--error-output-dir", default=str(REPO_ROOT / "outputs" / "errors"))
+    parser.add_argument("--progress-log", default=None)
+    parser.add_argument("--progress-every", type=int, default=100)
     return parser.parse_args(argv)
 
 
@@ -60,6 +62,8 @@ def main() -> int:
             retry=args.retry,
             output_dir=args.output_dir,
             error_output_dir=args.error_output_dir,
+            progress_log_path=args.progress_log,
+            progress_every=args.progress_every,
         ),
     )
 
@@ -77,6 +81,8 @@ def main() -> int:
         "cache_dir": str(Path(args.cache_dir).resolve()),
         "output_dir": str(Path(args.output_dir).resolve()),
         "error_output_dir": str(Path(args.error_output_dir).resolve()),
+        "progress_log": str(Path(args.progress_log).resolve()) if args.progress_log else "",
+        "progress_every": args.progress_every,
         "summary": result.summary,
         "fetch_errors": result.fetch_errors[:20],
         "candidates": _records(result.candidates),

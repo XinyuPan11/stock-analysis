@@ -90,6 +90,10 @@ def research_step(config: DailyWorkflowConfig) -> WorkflowStep:
         str(config.daily_output_dir),
         "--retry",
         str(config.retry),
+        "--progress-log",
+        str(config.workflow_output_dir / f"daily_research_progress_{config.end_date}.log"),
+        "--progress-every",
+        "100",
     ]
     _append_limit(command, config.limit)
     return WorkflowStep(

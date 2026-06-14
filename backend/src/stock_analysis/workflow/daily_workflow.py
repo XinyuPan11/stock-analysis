@@ -36,7 +36,10 @@ def run_daily_workflow(
 
     started_at = _now()
     started_timer = time.perf_counter()
+    summary_path = config.workflow_output_dir / f"workflow_summary_{config.end_date}.json"
+    log_path = config.workflow_output_dir / f"workflow_log_{config.end_date}.txt"
     log_lines: list[str] = [f"[{started_at}] workflow started"]
+    _write_log(log_path, log_lines)
     steps: list[dict[str, Any]] = []
     warnings: list[str] = []
     errors: list[str] = []
@@ -48,6 +51,7 @@ def run_daily_workflow(
     steps.append(env_step)
     warnings.extend(env_step.get("warnings", []))
     log_lines.append(_step_log_line(env_step))
+    _write_log(log_path, log_lines)
 
     planned_steps = build_plan(config)
     if config.dry_run:
@@ -55,6 +59,7 @@ def run_daily_workflow(
             record = _planned_record(step)
             steps.append(record)
             log_lines.append(_step_log_line(record))
+            _write_log(log_path, log_lines)
         health = output_health(config)
         missing_files = list(health["missing_files"])
         status = "planned"
@@ -72,13 +77,17 @@ def run_daily_workflow(
                     steps.append(record)
                     errors.append(record["error_message"])
                     log_lines.append(_step_log_line(record))
+                    _write_log(log_path, log_lines)
                     if step.critical and not config.continue_on_error:
                         stopped = True
                     continue
             command_runner = dashboard_runner if step.name == "dashboard" else runner
+            log_lines.append(f"[{_now()}] {step.name} start {command_text(step.command)}")
+            _write_log(log_path, log_lines)
             record = _run_step(step, config.repo_root, command_runner)
             steps.append(record)
             log_lines.append(_step_log_line(record))
+            _write_log(log_path, log_lines)
             output_files.extend(record.get("output_paths", []))
             if record["status"] == "failed":
                 errors.append(record["error_message"])
@@ -90,6 +99,7 @@ def run_daily_workflow(
         health_record = _health_record(health)
         steps.append(health_record)
         log_lines.append(_step_log_line(health_record))
+        _write_log(log_path, log_lines)
         if missing_files:
             warnings.append(f"output_health_missing_files:{len(missing_files)}")
         status = _workflow_status(steps, missing_files)
@@ -97,6 +107,7 @@ def run_daily_workflow(
     dashboard_url = config.dashboard_url if config.serve else ""
     if not config.serve:
         log_lines.append(f"Dashboard command: {command_text(dashboard_step(config).command)}")
+        _write_log(log_path, log_lines)
 
     ended_at = _now()
     summary = {
@@ -121,8 +132,6 @@ def run_daily_workflow(
         "dry_run": config.dry_run,
         "config": _serializable_config(config),
     }
-    summary_path = config.workflow_output_dir / f"workflow_summary_{config.end_date}.json"
-    log_path = config.workflow_output_dir / f"workflow_log_{config.end_date}.txt"
     summary["summary_path"] = str(summary_path)
     summary["log_path"] = str(log_path)
     _write_summary(summary_path, summary)

@@ -186,6 +186,24 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertEqual(summary["limit"], 1500)
         self.assertFalse(summary["full_market"])
 
+    def test_daily_research_command_includes_progress_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = _config(temp_dir, skip_prewarm=True, skip_backtest=True)
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], cwd: Path) -> CommandResult:
+                commands.append(command.copy())
+                _materialize_outputs(config, Path(command[1]).name)
+                return CommandResult(returncode=0)
+
+            run_daily_workflow(config, runner=runner)
+
+        research_command = next(command for command in commands if Path(command[1]).name == "run_daily_research.py")
+        self.assertIn("--progress-log", research_command)
+        progress_log_index = research_command.index("--progress-log")
+        self.assertTrue(research_command[progress_log_index + 1].endswith("daily_research_progress_2024-01-31.log"))
+        self.assertIn("--progress-every", research_command)
+
     def test_script_parsers_default_limit_to_none_and_keep_explicit_limit(self) -> None:
         script_args = {
             "run_daily_workflow.py": ["--start-date", "2023-01-01", "--end-date", "2024-01-31"],
