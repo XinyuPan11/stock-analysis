@@ -171,6 +171,9 @@ class ResearchPipelineTests(unittest.TestCase):
 
         self.assertIn("stock universe loaded", log_text)
         self.assertIn("cache coverage / loading start", log_text)
+        self.assertIn("stock daily start", log_text)
+        self.assertIn("stock daily cache state", log_text)
+        self.assertIn("stock daily end", log_text)
         self.assertIn("stock daily progress", log_text)
         self.assertIn("filtering end", log_text)
         self.assertIn("factor calculation start", log_text)

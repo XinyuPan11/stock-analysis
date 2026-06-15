@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 from pathlib import Path
+import time
 from typing import Protocol
 
 import pandas as pd
@@ -98,11 +99,48 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
     symbols = limited_universe["symbol"].astype(str).tolist()
     progress("cache coverage / loading start", symbol_count=len(symbols), progress_every=config.progress_every)
     for index, symbol in enumerate(symbols, start=1):
+        debug_enabled = config.progress_every == 1
+        symbol_timer = time.perf_counter()
+        if debug_enabled:
+            progress(
+                "stock daily start",
+                index=index,
+                total=len(symbols),
+                symbol=symbol,
+            )
+        debug = _cache_debug_state(service, symbol, config)
+        if debug_enabled:
+            progress(
+                "stock daily cache state",
+                index=index,
+                total=len(symbols),
+                symbol=symbol,
+                **debug,
+            )
         frame, error = _fetch_stock_daily_with_retry(service, symbol, config)
+        elapsed = time.perf_counter() - symbol_timer
+        row_count = 0 if frame is None else len(frame)
         if error:
             fetch_errors.append(error)
         elif frame is not None:
             daily_frames.append(frame)
+        if debug_enabled or error or elapsed > 10.0:
+            event = "SLOW_SYMBOL" if elapsed > 10.0 else "stock daily end"
+            coverage_ok = debug.get("coverage_ok", "unknown")
+            fetch_attempted: object = not coverage_ok if isinstance(coverage_ok, bool) else "unknown"
+            progress(
+                event,
+                index=index,
+                total=len(symbols),
+                symbol=symbol,
+                elapsed_seconds=round(elapsed, 4),
+                loaded_rows=row_count,
+                cache_hit=debug.get("cache_hit", "unknown"),
+                coverage_ok=coverage_ok,
+                fetch_attempted=fetch_attempted,
+                error_type=error.get("error_type", "") if error else "",
+                error_message=error.get("error", "") if error else "",
+            )
         if _should_report_progress(index, len(symbols), config.progress_every):
             progress(
                 "stock daily progress",
@@ -416,6 +454,56 @@ def _select_universe_batch(universe: pd.DataFrame, config: ResearchPipelineConfi
     if config.limit is None:
         return universe.iloc[config.offset :].reset_index(drop=True)
     return universe.iloc[config.offset : config.offset + config.limit].reset_index(drop=True)
+
+
+def _cache_debug_state(service: MarketDataServiceLike, symbol: str, config: ResearchPipelineConfig) -> dict[str, object]:
+    cache = getattr(service, "cache", None)
+    provider = getattr(getattr(service, "provider", None), "source", config.provider)
+    if cache is None or not hasattr(cache, "market_data_path"):
+        return {
+            "cache_hit": "unknown",
+            "coverage_ok": "unknown",
+            "cache_path": "",
+            "coverage_path": "",
+            "csv_exists": "unknown",
+            "coverage_exists": "unknown",
+        }
+    try:
+        cache_path = cache.market_data_path(
+            provider=provider,
+            dataset="stock_daily",
+            symbol=symbol,
+            adjusted=config.adjusted,
+        )
+        coverage_path = cache_path.with_suffix(".coverage.json")
+        coverage_ok = bool(
+            cache.has_market_data_coverage(
+                provider=provider,
+                dataset="stock_daily",
+                symbol=symbol,
+                start_date=config.start_date,
+                end_date=config.end_date,
+                adjusted=config.adjusted,
+            )
+        )
+        return {
+            "cache_hit": cache_path.exists() and coverage_ok,
+            "coverage_ok": coverage_ok,
+            "cache_path": str(cache_path),
+            "coverage_path": str(coverage_path),
+            "csv_exists": cache_path.exists(),
+            "coverage_exists": coverage_path.exists(),
+        }
+    except Exception as exc:
+        return {
+            "cache_hit": "unknown",
+            "coverage_ok": "unknown",
+            "cache_path": "",
+            "coverage_path": "",
+            "csv_exists": "unknown",
+            "coverage_exists": "unknown",
+            "cache_debug_error": str(exc),
+        }
 
 
 def _classify_error(error: str) -> str:
