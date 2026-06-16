@@ -31,8 +31,43 @@ class PortfolioReviewTests(unittest.TestCase):
 
         self.assertEqual(len(review["success_cases"]), 1)
         self.assertEqual(len(review["failure_cases"]), 1)
+        self.assertEqual(len(review["risk_warning_cases"]), 0)
         self.assertIn("trend continuation", review["success_cases"][0]["success_reason_candidates"])
         self.assertIn("post-entry pullback", review["failure_cases"][0]["failure_reason_candidates"])
+
+    def test_negative_return_never_appears_in_success_cases(self) -> None:
+        performance = [
+            {
+                "portfolio_id": "baseline",
+                "as_of_date": "2024-01-31",
+                "horizon_days": 60,
+                "best_cases": [{"symbol": "AAA", "future_return": -0.01, "future_excess_return": -0.02, "max_drawdown_during_holding": -0.05}],
+                "worst_cases": [{"symbol": "AAA", "future_return": -0.01, "future_excess_return": -0.02, "max_drawdown_during_holding": -0.05}],
+            }
+        ]
+
+        review = generate_portfolio_review(performance, {"baseline": [{"symbol": "AAA"}]})
+
+        self.assertEqual(review["success_cases"], [])
+        self.assertEqual(len(review["failure_cases"]), 1)
+
+    def test_positive_large_drawdown_is_risk_warning_not_failure(self) -> None:
+        performance = [
+            {
+                "portfolio_id": "baseline",
+                "as_of_date": "2024-01-31",
+                "horizon_days": 60,
+                "best_cases": [{"symbol": "AAA", "future_return": 0.08, "future_excess_return": 0.01, "max_drawdown_during_holding": -0.2}],
+                "worst_cases": [{"symbol": "AAA", "future_return": 0.08, "future_excess_return": 0.01, "max_drawdown_during_holding": -0.2}],
+            }
+        ]
+
+        review = generate_portfolio_review(performance, {"baseline": [{"symbol": "AAA"}]})
+
+        self.assertEqual(len(review["success_cases"]), 1)
+        self.assertEqual(review["failure_cases"], [])
+        self.assertEqual(len(review["risk_warning_cases"]), 1)
+        self.assertIn("positive return with large drawdown", review["risk_warning_cases"][0]["risk_warning_reason_candidates"])
 
     def test_review_suggestions_do_not_fabricate_non_price_reasons(self) -> None:
         review = generate_portfolio_review([], {})
@@ -46,4 +81,3 @@ class PortfolioReviewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

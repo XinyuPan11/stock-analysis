@@ -79,12 +79,22 @@ def evaluate_portfolio_performance(
     valid = valid.dropna(subset=["future_return"])
     if valid.empty:
         counts = rows["data_quality"].fillna("missing_future_label").value_counts().to_dict()
-        return {**base, "data_quality_counts": counts, "notes": ["no_valid_future_labels"]}
+        return {
+            **base,
+            "data_quality_counts": counts,
+            "missing_future_label_symbols": _missing_symbols(rows),
+            "non_ok_future_label_symbols": _non_ok_symbols(rows),
+            "notes": _coverage_notes(0, len(holdings), ["no_valid_future_labels"]),
+        }
 
     cost = transaction_cost_bps / 10000.0
     returns = valid["future_return"]
     excess = valid["future_excess_return"] if "future_excess_return" in valid.columns else pd.Series(dtype=float)
     drawdown = valid["max_drawdown_during_holding"] if "max_drawdown_during_holding" in valid.columns else pd.Series(dtype=float)
+    notes = ["risk_observation_only"] if rule and rule.observation_only else []
+    notes = _coverage_notes(len(valid), len(holdings), notes)
+    if _mean_or_none(excess) is None:
+        notes.append(_excess_missing_note(valid))
     return {
         **base,
         "valid_future_count": int(len(valid)),
@@ -98,7 +108,9 @@ def evaluate_portfolio_performance(
         "worst_cases": _case_rows(valid.sort_values("future_return", ascending=True).head(5)),
         "net_average_return": float(returns.mean() - cost),
         "data_quality_counts": rows["data_quality"].fillna("missing_future_label").value_counts().to_dict(),
-        "notes": ["risk_observation_only"] if rule and rule.observation_only else [],
+        "missing_future_label_symbols": _missing_symbols(rows),
+        "non_ok_future_label_symbols": _non_ok_symbols(rows),
+        "notes": notes,
     }
 
 
@@ -123,7 +135,9 @@ def _case_rows(frame: pd.DataFrame) -> list[dict[str, object]]:
         "symbol",
         "name",
         "future_return",
+        "benchmark_return",
         "future_excess_return",
+        "outperformed_benchmark",
         "max_drawdown_during_holding",
         "entry_rank",
         "entry_score",
@@ -145,8 +159,40 @@ def _clean_record(row: dict[str, object]) -> dict[str, object]:
     return cleaned
 
 
+def _coverage_notes(valid_count: int, holding_count: int, notes: list[str]) -> list[str]:
+    result = list(notes)
+    if holding_count and valid_count / holding_count < 0.5:
+        result.extend(["low_future_label_coverage", "portfolio_result_not_reliable", "needs_portfolio_cache_prep"])
+    return result
+
+
+def _missing_symbols(rows: pd.DataFrame) -> list[str]:
+    if rows.empty or "symbol" not in rows.columns:
+        return []
+    if "data_quality" not in rows.columns:
+        return rows["symbol"].dropna().astype(str).tolist()
+    missing = rows[rows["data_quality"].isna()]
+    return missing["symbol"].dropna().astype(str).tolist()
+
+
+def _non_ok_symbols(rows: pd.DataFrame) -> list[str]:
+    if rows.empty or "symbol" not in rows.columns:
+        return []
+    if "data_quality" not in rows.columns:
+        return rows["symbol"].dropna().astype(str).tolist()
+    non_ok = rows[rows["data_quality"].isna() | (rows["data_quality"] != "ok")]
+    return non_ok["symbol"].dropna().astype(str).tolist()
+
+
+def _excess_missing_note(valid: pd.DataFrame) -> str:
+    if "benchmark_data_quality" in valid.columns:
+        qualities = set(valid["benchmark_data_quality"].dropna().astype(str))
+        if qualities:
+            return "benchmark_missing" if any("benchmark" in item and item != "ok" for item in qualities) else "future_excess_missing"
+    return "future_excess_missing"
+
+
 def _to_frame(value: pd.DataFrame | Iterable[dict[str, object]]) -> pd.DataFrame:
     if isinstance(value, pd.DataFrame):
         return value.copy()
     return pd.DataFrame(list(value))
-
