@@ -12,10 +12,12 @@ from stock_analysis.research.multi_label import (
     PRIMARY_HIGH_RISK_ACTIVE,
     PRIMARY_INSUFFICIENT_DATA,
     PRIMARY_LONG_TERM_STABLE,
+    PRIMARY_NORMAL_WATCH,
     PRIMARY_TREND_LEADER,
     TAG_INDUSTRY_PENDING,
     label_candidates,
 )
+from stock_analysis.research.universe_quality import build_label_input_rows, classify_instrument
 
 
 class MultiLabelTests(unittest.TestCase):
@@ -54,6 +56,44 @@ class MultiLabelTests(unittest.TestCase):
         self.assertNotEqual(row["primary_type"], "行业热股型")
         self.assertIn(TAG_INDUSTRY_PENDING, row["secondary_tags"])
         self.assertIn("不做行业热度判断", row["label_reason"])
+
+    def test_non_stock_index_is_excluded_from_label_input(self) -> None:
+        label_inputs, excluded = build_label_input_rows(
+            [],
+            factors=[_factor("sz.399001")],
+            stock_universe=[{"symbol": "sz.399001", "name": "深证成份指数"}],
+            as_of_date="2024-01-31",
+        )
+
+        self.assertEqual(label_inputs, [])
+        self.assertEqual(excluded[0]["instrument_type"], "index")
+        self.assertIn("指数", excluded[0]["excluded_reason"])
+
+    def test_bond_index_is_excluded_with_reason(self) -> None:
+        classification = classify_instrument({"symbol": "sh.000999", "name": "国证企债指数"})
+
+        self.assertFalse(classification["is_stock"])
+        self.assertIn(classification["instrument_type"], {"bond_or_bond_index", "index"})
+        self.assertTrue(classification["excluded_reason"])
+
+    def test_state_owned_company_name_is_not_excluded_by_country_character(self) -> None:
+        classification = classify_instrument({"symbol": "sh.601088", "name": "中国神华"})
+
+        self.assertTrue(classification["is_stock"])
+
+    def test_factor_only_stock_receives_observation_status(self) -> None:
+        label_inputs, excluded = build_label_input_rows(
+            [],
+            factors=[_factor("sz.300119")],
+            stock_universe=[{"symbol": "sz.300119", "name": "瑞普生物"}],
+            as_of_date="2024-01-31",
+        )
+        labels = label_candidates(label_inputs, factors=[_factor("sz.300119")])
+        row = _row(labels, "sz.300119")
+
+        self.assertEqual(excluded, [])
+        self.assertIn(row["primary_type"], {PRIMARY_NORMAL_WATCH, "突破爆发型", "潜力蓄势型", PRIMARY_TREND_LEADER, PRIMARY_LONG_TERM_STABLE})
+        self.assertEqual(row["research_status"], row["primary_type"])
 
 
 def _row(frame: pd.DataFrame, symbol: str) -> pd.Series:

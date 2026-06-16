@@ -120,6 +120,10 @@ class OutputLoader:
     def lists_dir(self) -> Path:
         return self.outputs_dir / "lists"
 
+    @property
+    def search_dir(self) -> Path:
+        return self.outputs_dir / "search"
+
     def latest_daily_date(self) -> str | None:
         dates: set[str] = set()
         for prefix in ["candidates", "summary", "factors", "factor_explanations"]:
@@ -140,6 +144,10 @@ class OutputLoader:
 
     def latest_list_date(self) -> str | None:
         dates = self._dates_from_files(self.lists_dir, r"^multi_lists_(\d{4}-\d{2}-\d{2})\.json$")
+        return max(dates) if dates else self.latest_label_date()
+
+    def latest_search_date(self) -> str | None:
+        dates = self._dates_from_files(self.search_dir, r"^stock_index_(\d{4}-\d{2}-\d{2})\.json$")
         return max(dates) if dates else self.latest_label_date()
 
     def latest(self) -> dict[str, Any]:
@@ -509,6 +517,9 @@ class OutputLoader:
                     "sort_logic": item.get("sort_logic", ""),
                     "eligible_filters": item.get("eligible_filters", []),
                     "top_n": item.get("top_n", 0),
+                    "source_universe_count": item.get("source_universe_count", 0),
+                    "eligible_count": item.get("eligible_count", 0),
+                    "excluded_count": item.get("excluded_count", 0),
                     "item_count": len(rows),
                     "items_preview": rows[:5],
                 }
@@ -562,6 +573,9 @@ class OutputLoader:
             "sort_logic": payload.get("sort_logic", ""),
             "eligible_filters": payload.get("eligible_filters", []),
             "top_n": payload.get("top_n", 0),
+            "source_universe_count": payload.get("source_universe_count", 0),
+            "eligible_count": payload.get("eligible_count", 0),
+            "excluded_count": payload.get("excluded_count", 0),
             "item_count": len(items),
             "items": self._sanitize_payload(items),
             "disclaimer": API_DISCLAIMER,
@@ -610,11 +624,15 @@ class OutputLoader:
         query_text = query.strip()
         if not query_text:
             return {"ok": False, "message": "Query parameter q is required.", "query": query, "count": 0, "items": [], "disclaimer": API_DISCLAIMER}
-        rows = self._load_label_rows(self.latest_label_date())
+        rows = self._load_stock_index_rows(self.latest_search_date())
+        if not rows:
+            rows = self._load_label_rows(self.latest_label_date())
         matches = [row for row in rows if self._symbol_or_name_matches(row, query_text)]
+        if "." not in query_text and any(bool(row.get("is_stock", True)) for row in matches):
+            matches = [row for row in matches if bool(row.get("is_stock", True))]
         return {
             "ok": True,
-            "message": "",
+            "message": "" if matches else "No matching stock found in current static outputs.",
             "query": query_text,
             "count": len(matches),
             "items": [self._search_result_item(row) for row in matches],
@@ -636,15 +654,20 @@ class OutputLoader:
             }
         rows = self._load_label_rows(label_date)
         label_row = next((row for row in rows if self._symbol_matches(str(row.get("symbol", "")), requested)), None)
-        normalized = str(label_row.get("symbol")) if label_row else self._normalize_symbol_with_prefix(requested)
+        stock_index_row = self._stock_index_row_for_symbol(requested)
+        normalized = str(label_row.get("symbol")) if label_row else str(stock_index_row.get("symbol") or self._normalize_symbol_with_prefix(requested))
         failed = self._failed_symbol_detail(requested)
         if not label_row:
+            if stock_index_row:
+                return self._stock_index_research_detail(stock_index_row, failed=failed)
+            if failed:
+                return self._failed_symbol_research_detail(requested, failed, label_date)
             return {
                 "ok": False,
-                "message": "Symbol not found in current fixed historical candidate label set.",
+                "message": "Symbol not found in current static research outputs.",
                 "date": label_date,
                 "symbol": normalized,
-                "data_quality": "failed_symbol" if failed else "not_in_candidate_labels",
+                "data_quality": "not_found",
                 "failed_symbol": failed,
                 "disclaimer": API_DISCLAIMER,
             }
@@ -1058,6 +1081,21 @@ class OutputLoader:
             return []
         return [row for row in self._sanitize_payload(rows) if isinstance(row, dict)]
 
+    def _stock_index_file(self, as_of_date: str | None) -> Path | None:
+        if not as_of_date:
+            return None
+        return self.search_dir / f"stock_index_{as_of_date}.json"
+
+    def _load_stock_index_rows(self, as_of_date: str | None) -> list[dict[str, Any]]:
+        path = self._stock_index_file(as_of_date)
+        if not path or not path.exists():
+            return []
+        payload = self._read_json(path, fallback={})
+        rows = payload.get("items", payload) if isinstance(payload, dict) else payload
+        if not isinstance(rows, list):
+            return []
+        return [row for row in self._sanitize_payload(rows) if isinstance(row, dict)]
+
     def _candidate_row_for_symbol(self, symbol: str) -> dict[str, Any]:
         candidates = self.load_candidates()
         for row in candidates.get("items", []):
@@ -1076,6 +1114,12 @@ class OutputLoader:
             return {}
         for row in rows:
             if isinstance(row, dict) and self._symbol_matches(str(row.get("symbol", "")), symbol):
+                return row
+        return {}
+
+    def _stock_index_row_for_symbol(self, symbol: str) -> dict[str, Any]:
+        for row in self._load_stock_index_rows(self.latest_search_date()):
+            if self._symbol_matches(str(row.get("symbol", "")), symbol):
                 return row
         return {}
 
@@ -1114,15 +1158,105 @@ class OutputLoader:
         symbol = str(row.get("symbol", ""))
         return {
             "symbol": symbol,
+            "code": row.get("code", self._symbol_code(symbol)),
             "name": row.get("name", ""),
             "rank": row.get("rank", 0),
             "total_score": row.get("total_score", 0),
+            "research_status": row.get("research_status", row.get("primary_type", "")),
             "primary_type": row.get("primary_type", ""),
             "secondary_tags": row.get("secondary_tags", []),
             "research_action": row.get("research_action", ""),
             "confidence_level": row.get("confidence_level", ""),
             "risk_level": row.get("risk_level", ""),
-            "report_links": self._report_link(self.stock_report_file(symbol)) or {},
+            "in_any_list": bool(row.get("in_any_list", False)),
+            "related_lists": row.get("related_lists", []),
+            "data_quality": row.get("data_quality", ""),
+            "has_report": self._has_report_link(row.get("report_links")) or self._has_report_link(self._report_link(self.stock_report_file(symbol))),
+            "report_links": row.get("report_links") or self._report_link(self.stock_report_file(symbol)) or {},
+            "message": row.get("message", ""),
+        }
+
+    def _stock_index_research_detail(self, row: dict[str, Any], *, failed: dict[str, Any] | None) -> dict[str, Any]:
+        symbol = str(row.get("symbol", ""))
+        is_stock = bool(row.get("is_stock", True))
+        factors = self._factor_row_for_symbol(symbol) if is_stock else {}
+        report = row.get("report_links") or self._report_link(self.stock_report_file(symbol)) or {}
+        score_breakdown = {
+            "momentum_score": row.get("momentum_score", factors.get("momentum_score", "")),
+            "trend_score": row.get("trend_score", factors.get("trend_score", "")),
+            "relative_strength_score": row.get("relative_strength_score", factors.get("relative_strength_score", "")),
+            "risk_score": row.get("risk_score", factors.get("risk_score", "")),
+            "liquidity_score": row.get("liquidity_score", factors.get("liquidity_score", "")),
+        }
+        return {
+            "ok": True,
+            "message": row.get("message", ""),
+            "date": self.latest_search_date(),
+            "symbol": symbol,
+            "name": row.get("name", ""),
+            "basic_info": {
+                "symbol": symbol,
+                "name": row.get("name", ""),
+                "as_of_date": self.latest_search_date() or "",
+                "source_label": row.get("research_status", ""),
+                "instrument_type": row.get("instrument_type", ""),
+            },
+            "current_rank": row.get("rank", 0),
+            "total_score": row.get("total_score", 0),
+            "score_breakdown": score_breakdown,
+            "primary_type": row.get("primary_type", row.get("research_status", "")),
+            "secondary_tags": row.get("secondary_tags", []),
+            "research_action": row.get("research_action", ""),
+            "confidence_level": row.get("confidence_level", ""),
+            "risk_level": row.get("risk_level", ""),
+            "confirmation_signals": row.get("confirmation_signals", []),
+            "invalidation_signals": row.get("invalidation_signals", []),
+            "label_reason": row.get("message", ""),
+            "factor_explanation": self.get_factor_summary_by_symbol(symbol) if is_stock else {},
+            "evidence": {"positive": "", "negative": row.get("excluded_reason", "")},
+            "risk_flags": "",
+            "warnings": row.get("excluded_reason", ""),
+            "factor_row": self._sanitize_payload(factors),
+            "report_links": report,
+            "related_lists": row.get("related_lists", []),
+            "data_quality": row.get("data_quality", ""),
+            "failed_symbol": failed,
+            "is_stock": is_stock,
+            "instrument_type": row.get("instrument_type", ""),
+            "excluded_reason": row.get("excluded_reason", ""),
+            "disclaimer": API_DISCLAIMER,
+        }
+
+    def _failed_symbol_research_detail(self, requested: str, failed: dict[str, Any], label_date: str | None) -> dict[str, Any]:
+        normalized = self._normalize_symbol_with_prefix(requested)
+        return {
+            "ok": True,
+            "message": "Symbol exists in failed_symbols and has insufficient data.",
+            "date": label_date,
+            "symbol": normalized,
+            "name": failed.get("name", ""),
+            "basic_info": {"symbol": normalized, "name": failed.get("name", ""), "as_of_date": label_date or "", "source_label": "数据不足"},
+            "current_rank": 0,
+            "total_score": 0,
+            "score_breakdown": {},
+            "primary_type": "数据不足",
+            "secondary_tags": [],
+            "research_action": "数据补充后再评估",
+            "confidence_level": "低",
+            "risk_level": "不明",
+            "confirmation_signals": [],
+            "invalidation_signals": [],
+            "label_reason": "当前仅存在失败记录，未形成完整因子与榜单输出。",
+            "factor_explanation": {},
+            "evidence": {"positive": "", "negative": failed.get("error_message", failed.get("error", ""))},
+            "risk_flags": "",
+            "warnings": failed.get("error_type", ""),
+            "factor_row": {},
+            "report_links": {},
+            "related_lists": [],
+            "data_quality": "failed_symbol",
+            "failed_symbol": failed,
+            "disclaimer": API_DISCLAIMER,
         }
 
     def _symbol_or_name_matches(self, row: dict[str, Any], query: str) -> bool:
@@ -1135,6 +1269,8 @@ class OutputLoader:
         normalized_query = self._normalize_symbol(query)
         if normalized_symbol == normalized_query:
             return True
+        if "." in normalized_query:
+            return False
         return self._symbol_code(normalized_symbol) == self._symbol_code(normalized_query)
 
     def _symbol_code(self, symbol: str) -> str:
@@ -1265,8 +1401,11 @@ class OutputLoader:
             "html_path": str(report.html_path) if report.html_path and report.html_path.exists() else None,
             "markdown_url": f"{route}?format=markdown" if route and report.markdown_path and report.markdown_path.exists() else None,
             "html_url": f"{route}?format=html" if route and report.html_path and report.html_path.exists() else None,
-            "page_url": page_route if page_route and (report.markdown_path or report.html_path) else None,
+            "page_url": page_route if page_route and ((report.markdown_path and report.markdown_path.exists()) or (report.html_path and report.html_path.exists())) else None,
         }
+
+    def _has_report_link(self, value: Any) -> bool:
+        return isinstance(value, dict) and bool(value.get("markdown_path") or value.get("html_path") or value.get("markdown_url") or value.get("html_url") or value.get("page_url"))
 
     def _format_report_content(self, content: dict[str, Any], *, format: str) -> dict[str, Any]:
         if format == "html":

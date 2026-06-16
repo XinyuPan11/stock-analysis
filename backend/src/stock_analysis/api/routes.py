@@ -826,6 +826,10 @@ def _lists_overview_html(payload: dict[str, Any]) -> str:
       <span class="badge">Research Lists</span>
     </header>
 
+    <section class="notice">
+      <p>榜单为从全市场有效股票标签层中筛选出的 Top N 研究视角，不代表只有这些股票存在研究数据。</p>
+    </section>
+
     <section>
       <h2>股票搜索</h2>
       {_stock_search_form()}
@@ -861,8 +865,13 @@ def _list_detail_html(payload: dict[str, Any]) -> str:
       <dl>
         <dt>sort_logic</dt><dd>{escape(str(payload.get("sort_logic") or ""))}</dd>
         <dt>eligible_filters</dt><dd>{escape("; ".join(str(item) for item in _as_list(payload.get("eligible_filters"))))}</dd>
+        <dt>source_universe_count</dt><dd>{escape(str(payload.get("source_universe_count", "")))}</dd>
+        <dt>eligible_count</dt><dd>{escape(str(payload.get("eligible_count", "")))}</dd>
+        <dt>top_n</dt><dd>{escape(str(payload.get("top_n", "")))}</dd>
+        <dt>excluded_count</dt><dd>{escape(str(payload.get("excluded_count", "")))}</dd>
         <dt>item_count</dt><dd>{escape(str(payload.get("item_count", 0)))}</dd>
       </dl>
+      <p class="muted">榜单为从全市场有效股票标签层中筛选出的 Top N 研究视角，不代表只有这些股票存在研究数据。</p>
       {risk_notice}
     </section>
 

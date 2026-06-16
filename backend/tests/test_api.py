@@ -733,6 +733,46 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["count"], 0)
 
+    def test_stock_search_finds_factors_only_stock_from_stock_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/stocks/search", params={"q": "300119"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["symbol"], "sz.300119")
+        self.assertEqual(payload["items"][0]["primary_type"], "普通观察")
+        self.assertFalse(payload["items"][0]["in_any_list"])
+
+    def test_stock_search_finds_failed_symbol_as_insufficient_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/stocks/search", params={"q": "600006"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["symbol"], "sh.600006")
+        self.assertEqual(payload["items"][0]["data_quality"], "failed_symbol")
+
+    def test_stock_search_with_prefixed_non_stock_returns_excluded_item(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/stocks/search", params={"q": "sh.000001"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["symbol"], "sh.000001")
+        self.assertEqual(payload["items"][0]["primary_type"], "非股票标的")
+
     def test_stock_research_api_returns_label_score_risk_and_reports(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             _write_outputs(temp_dir)
@@ -762,6 +802,47 @@ class ApiTests(unittest.TestCase):
         payload = response.json()
         self.assertFalse(payload["ok"])
         self.assertIn("not found", payload["message"].lower())
+
+    def test_stock_research_factors_only_symbol_returns_limited_detail(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/stocks/sz.300119/research")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["symbol"], "sz.300119")
+        self.assertEqual(payload["primary_type"], "普通观察")
+        self.assertEqual(payload["related_lists"], [])
+
+    def test_stock_research_failed_symbol_returns_insufficient_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/stocks/sh.600006/research")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["primary_type"], "数据不足")
+        self.assertEqual(payload["data_quality"], "failed_symbol")
+
+    def test_stock_research_non_stock_symbol_returns_excluded_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/stocks/sh.000001/research")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["is_stock"])
+        self.assertEqual(payload["primary_type"], "非股票标的")
+        self.assertEqual(payload["data_quality"], "excluded_non_stock")
 
     def test_home_and_output_health_show_latest_workflow_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -892,6 +973,7 @@ def _write_outputs(root: str) -> None:
     workflow = outputs / "workflow"
     labels_dir = outputs / "labels"
     lists_dir = outputs / "lists"
+    search_dir = outputs / "search"
     daily.mkdir(parents=True)
     stock_reports.mkdir(parents=True)
     backtests.mkdir(parents=True)
@@ -900,6 +982,7 @@ def _write_outputs(root: str) -> None:
     workflow.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
     lists_dir.mkdir(parents=True)
+    search_dir.mkdir(parents=True)
 
     candidates = [
         {
@@ -973,6 +1056,7 @@ def _write_outputs(root: str) -> None:
     factors = [
         {"symbol": "sh.600016", "as_of_date": "2024-01-31", "momentum_60d": 0.18},
         {"symbol": "sh.600015", "as_of_date": "2024-01-31", "momentum_60d": 0.12},
+        {"symbol": "sz.300119", "as_of_date": "2024-01-31", "momentum_60d": 0.08},
     ]
     summary = {
         "as_of_date": "2024-01-31",
@@ -1066,6 +1150,18 @@ def _write_outputs(root: str) -> None:
     )
     for item in lists:
         (lists_dir / f"{item['list_id']}_2024-01-31.json").write_text(json.dumps(item, ensure_ascii=False), encoding="utf-8")
+    stock_index = [
+        _stock_index_row("sh.600016", "民生银行", primary_type="趋势龙头型", in_any_list=True, related_lists=[{"list_id": "high_confidence_candidates", "list_name": "高置信候选", "position": 1, "item_count": 2}]),
+        _stock_index_row("sh.600000", "浦发银行", primary_type="长期稳定型", in_any_list=True, related_lists=[{"list_id": "high_confidence_candidates", "list_name": "高置信候选", "position": 2, "item_count": 2}]),
+        _stock_index_row("sz.000001", "平安银行", primary_type="趋势龙头型"),
+        _stock_index_row("sz.300119", "瑞普生物", primary_type="普通观察", in_factors=True, in_candidate_pool=False, message="有标签但未进入主要榜单，作为普通观察。"),
+        _stock_index_row("sh.600006", "东风股份", primary_type="数据不足", data_quality="failed_symbol", in_failed_symbols=True, message="当前数据不足，需要补齐后再评估。"),
+        _stock_index_row("sh.000001", "上证指数", is_stock=False, instrument_type="index", primary_type="非股票标的", data_quality="excluded_non_stock", excluded_reason="name_or_symbol_contains:指数", message="该标的不纳入 A 股个股研究榜单。"),
+    ]
+    (search_dir / "stock_index_2024-01-31.json").write_text(
+        json.dumps({"status": "ok", "as_of_date": "2024-01-31", "item_count": len(stock_index), "items": stock_index}, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def _label_row(
@@ -1146,10 +1242,62 @@ def _research_lists(labels: list[dict[str, object]]) -> list[dict[str, object]]:
             "eligible_filters": ["unit filter"],
             "as_of_date": "2024-01-31",
             "top_n": 30,
+            "source_universe_count": len(labels),
+            "eligible_count": len(items),
+            "excluded_count": max(len(labels) - len(items), 0),
             "items": items,
         }
         for list_id, items in definitions.items()
     ]
+
+
+def _stock_index_row(
+    symbol: str,
+    name: str,
+    *,
+    primary_type: str,
+    is_stock: bool = True,
+    instrument_type: str = "stock",
+    in_factors: bool = True,
+    in_candidate_pool: bool = True,
+    in_any_list: bool = False,
+    in_failed_symbols: bool = False,
+    data_quality: str = "ok",
+    excluded_reason: str = "",
+    message: str = "",
+    related_lists: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    return {
+        "symbol": symbol,
+        "code": symbol.split(".")[-1],
+        "name": name,
+        "is_stock": is_stock,
+        "instrument_type": instrument_type,
+        "research_status": primary_type,
+        "primary_type": primary_type,
+        "secondary_tags": [primary_type] if is_stock else [],
+        "research_action": "持续跟踪" if is_stock else "不纳入股票研究榜单",
+        "confidence_level": "中",
+        "risk_level": "中" if is_stock else "",
+        "rank": 0,
+        "total_score": 50.0 if is_stock else 0.0,
+        "momentum_score": 10.0,
+        "trend_score": 10.0,
+        "relative_strength_score": 10.0,
+        "risk_score": 10.0,
+        "liquidity_score": 10.0,
+        "in_factors": in_factors,
+        "in_candidate_labels": is_stock,
+        "in_candidate_pool": in_candidate_pool,
+        "in_failed_symbols": in_failed_symbols,
+        "in_any_list": in_any_list,
+        "related_lists": related_lists or [],
+        "has_report": False,
+        "report_links": {},
+        "data_quality": data_quality,
+        "excluded_reason": excluded_reason,
+        "message": message,
+    }
 
 
 if __name__ == "__main__":
