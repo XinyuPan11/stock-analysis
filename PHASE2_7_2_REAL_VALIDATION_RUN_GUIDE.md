@@ -4,7 +4,7 @@
 
 This guide explains how to prepare future-window cache data and run the Phase 2.7.2 walk-forward validation framework for the fixed as-of research view dated `2024-01-31`.
 
-The validation remains read-only by default. It must not regenerate scores, labels, factors, or lists.
+Use `--dry-run` for read-only validation checks. When `--dry-run` is omitted, the validation CLI refreshes files under `outputs/validation`; it still must not regenerate scores, labels, factors, or lists.
 
 ## No Future Leakage Boundary
 

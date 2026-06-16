@@ -14,7 +14,7 @@ Framework implemented; full validation not run by Codex.
 
 ## CLI Parameters
 
-The new CLI is read-only by default:
+The CLI is read-only only when `--dry-run` is passed:
 
 ```powershell
 python backend\scripts\run_walk_forward_validation.py --as-of-date 2024-01-31 --horizon-days 20 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 50 --dry-run
