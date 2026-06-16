@@ -23,6 +23,9 @@ class MultiListTests(unittest.TestCase):
         self.assertIn("description", first)
         self.assertIn("sort_logic", first)
         self.assertIn("eligible_filters", first)
+        self.assertIn("source_universe_count", first)
+        self.assertIn("eligible_count", first)
+        self.assertIn("excluded_count", first)
         self.assertIn("items", first)
 
     def test_insufficient_data_enters_insufficient_list(self) -> None:
@@ -50,6 +53,25 @@ class MultiListTests(unittest.TestCase):
 
         self.assertTrue(items)
         self.assertTrue(any("风险" in signal or "波动" in signal or "回撤" in signal for signal in items[0]["invalidation_signals"]))
+
+    def test_accumulation_watch_is_not_identical_to_trend_leaders(self) -> None:
+        labels = label_candidates(_candidate_rows(), factors=_factor_rows())
+        by_id = list_by_id(build_multi_lists(labels, top_n=2))
+
+        trend_symbols = [item["symbol"] for item in by_id["trend_leaders"]["items"]]
+        accumulation_symbols = [item["symbol"] for item in by_id["accumulation_watch"]["items"]]
+
+        self.assertNotEqual(trend_symbols, accumulation_symbols)
+
+    def test_list_items_record_source_universe_counts(self) -> None:
+        labels = label_candidates(_candidate_rows(), factors=_factor_rows())
+        by_id = list_by_id(build_multi_lists(labels, top_n=2))
+
+        high_confidence = by_id["high_confidence_candidates"]
+
+        self.assertEqual(high_confidence["source_universe_count"], len(labels))
+        self.assertGreaterEqual(high_confidence["eligible_count"], len(high_confidence["items"]))
+        self.assertEqual(high_confidence["top_n"], 2)
 
 
 if __name__ == "__main__":

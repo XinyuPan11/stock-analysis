@@ -13,6 +13,7 @@ PRIMARY_ACCUMULATION = "潜力蓄势型"
 PRIMARY_BREAKOUT = "突破爆发型"
 PRIMARY_REBOUND = "超跌反弹型"
 PRIMARY_HIGH_RISK_ACTIVE = "高风险活跃型"
+PRIMARY_NORMAL_WATCH = "普通观察"
 PRIMARY_INSUFFICIENT_DATA = "数据不足"
 
 TAG_INDUSTRY_PENDING = "行业字段待补充"
@@ -24,6 +25,7 @@ LABEL_OUTPUT_COLUMNS = [
     "rank",
     "total_score",
     "primary_type",
+    "research_status",
     "secondary_tags",
     "research_label",
     "research_action",
@@ -169,9 +171,7 @@ def _label_one(
     elif accumulation:
         primary_type = PRIMARY_ACCUMULATION
     else:
-        primary_type = PRIMARY_ACCUMULATION
-        if PRIMARY_ACCUMULATION not in secondary_tags:
-            secondary_tags.insert(0, PRIMARY_ACCUMULATION)
+        primary_type = PRIMARY_NORMAL_WATCH
 
     confidence_level = _confidence_level(row, data_quality_notes=data_quality_notes, high_risk=high_risk, insufficient=insufficient)
     risk_level = _risk_level(percentiles, risk_flags=risk_flags, high_risk=high_risk, severe_risk=severe_risk, insufficient=insufficient)
@@ -189,6 +189,7 @@ def _label_one(
         "rank": _safe_int(row.get("rank")),
         "total_score": _safe_float(row.get("total_score")),
         "primary_type": primary_type,
+        "research_status": primary_type,
         "secondary_tags": secondary_tags,
         "research_label": research_label,
         "research_action": research_action,
