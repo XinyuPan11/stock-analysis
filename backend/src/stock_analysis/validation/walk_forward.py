@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -8,7 +9,7 @@ from typing import Iterable
 import pandas as pd
 
 from stock_analysis.validation.factor_effectiveness import evaluate_factor_effectiveness
-from stock_analysis.validation.future_returns import calculate_future_return_labels, load_cached_price_history
+from stock_analysis.validation.future_returns import calculate_future_return_labels, load_cached_benchmark_history, load_cached_price_history
 from stock_analysis.validation.list_performance import SUPPORTED_LIST_IDS, evaluate_lists_performance
 
 
@@ -36,12 +37,10 @@ def run_walk_forward_validation(config: WalkForwardConfig) -> dict[str, object]:
     labels = _load_label_rows(outputs_dir, config.as_of_date)
     labels = _limit_rows(labels, config.limit)
     symbols = labels["symbol"].dropna().astype(str).tolist() if "symbol" in labels.columns else []
-    benchmark_history = load_cached_price_history(
+    benchmark_history, benchmark_symbol, benchmark_quality = load_cached_benchmark_history(
         config.cache_dir,
         provider=config.provider,
-        symbol=config.benchmark,
-        dataset="index_daily",
-        adjusted=False,
+        benchmark=config.benchmark,
     )
     price_histories = {
         symbol: load_cached_price_history(config.cache_dir, provider=config.provider, symbol=symbol)
@@ -57,14 +56,14 @@ def run_walk_forward_validation(config: WalkForwardConfig) -> dict[str, object]:
     future_frame = pd.DataFrame(future_labels)
     list_payloads = _load_list_payloads(outputs_dir, config.as_of_date, config.list_ids)
     list_performance = evaluate_lists_performance(list_payloads, future_frame, horizon_days=config.horizon_days)
-    factor_rows = _load_factor_rows(outputs_dir, config.as_of_date, labels)
+    factor_rows = load_factor_rows_for_validation(outputs_dir, config.as_of_date, labels)
     factor_effectiveness = evaluate_factor_effectiveness(
         factor_rows,
         future_frame,
         as_of_date=config.as_of_date,
         horizon_days=config.horizon_days,
     )
-    summary = _summary_payload(config, future_frame, list_performance, factor_effectiveness)
+    summary = _summary_payload(config, future_frame, list_performance, factor_effectiveness, benchmark_symbol=benchmark_symbol, benchmark_quality=benchmark_quality)
     result = {
         "summary": summary,
         "future_labels": future_labels,
@@ -89,7 +88,7 @@ def write_validation_outputs(config: WalkForwardConfig, result: dict[str, object
         "report_md": validation_dir / f"walk_forward_report_{suffix}.md",
     }
     _write_json(paths["summary"], result["summary"])
-    pd.DataFrame(result["future_labels"]).to_csv(paths["predictions"], index=False, encoding="utf-8")
+    pd.DataFrame(sanitize_for_json(result["future_labels"])).to_csv(paths["predictions"], index=False, encoding="utf-8")
     _write_json(paths["list_performance"], result["list_performance"])
     _write_json(paths["factor_effectiveness"], result["factor_effectiveness"])
     paths["report_md"].write_text(_markdown_report(result), encoding="utf-8")
@@ -101,6 +100,8 @@ def _summary_payload(
     future_frame: pd.DataFrame,
     list_performance: list[dict[str, object]],
     factor_effectiveness: list[dict[str, object]],
+    benchmark_symbol: str,
+    benchmark_quality: str,
 ) -> dict[str, object]:
     quality_counts = future_frame["data_quality"].value_counts().to_dict() if "data_quality" in future_frame.columns else {}
     valid = future_frame[future_frame.get("data_quality", "") == "ok"] if not future_frame.empty else pd.DataFrame()
@@ -109,6 +110,8 @@ def _summary_payload(
         "as_of_date": config.as_of_date,
         "horizon_days": config.horizon_days,
         "benchmark": config.benchmark,
+        "benchmark_symbol": benchmark_symbol,
+        "benchmark_data_quality": benchmark_quality,
         "dry_run": config.dry_run,
         "no_future_leakage": True,
         "symbol_count": int(len(future_frame)),
@@ -145,12 +148,24 @@ def _load_list_payloads(outputs_dir: Path, as_of_date: str, list_ids: Iterable[s
     return result
 
 
-def _load_factor_rows(outputs_dir: Path, as_of_date: str, labels: pd.DataFrame) -> pd.DataFrame:
-    path = outputs_dir / "daily" / f"factors_{as_of_date}.json"
-    if path.exists():
-        rows = json.loads(path.read_text(encoding="utf-8"))
-        return pd.DataFrame(rows if isinstance(rows, list) else [])
-    return labels.copy()
+def load_factor_rows_for_validation(outputs_dir: str | Path, as_of_date: str, labels: pd.DataFrame | None = None) -> pd.DataFrame:
+    outputs_path = Path(outputs_dir)
+    frames: list[pd.DataFrame] = []
+    if labels is not None and not labels.empty:
+        frames.append(_normalize_factor_source(labels))
+    for path in [
+        outputs_path / "labels" / f"stock_labels_{as_of_date}.json",
+        outputs_path / "labels" / f"candidate_labels_{as_of_date}.json",
+        outputs_path / "daily" / f"candidates_{as_of_date}.json",
+        outputs_path / "daily" / f"factors_{as_of_date}.json",
+    ]:
+        rows = _load_json_rows(path)
+        if rows:
+            frames.append(_normalize_factor_source(pd.DataFrame(rows)))
+    list_rows = _load_list_item_rows(outputs_path, as_of_date)
+    if list_rows:
+        frames.append(_normalize_factor_source(pd.DataFrame(list_rows)))
+    return _merge_factor_frames(frames)
 
 
 def _limit_rows(frame: pd.DataFrame, limit: int | None) -> pd.DataFrame:
@@ -160,7 +175,114 @@ def _limit_rows(frame: pd.DataFrame, limit: int | None) -> pd.DataFrame:
 
 
 def _write_json(path: Path, payload: object) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(sanitize_for_json(payload), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+
+
+def sanitize_for_json(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(key): sanitize_for_json(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [sanitize_for_json(item) for item in value]
+    if isinstance(value, tuple):
+        return [sanitize_for_json(item) for item in value]
+    if isinstance(value, pd.DataFrame):
+        return sanitize_for_json(value.to_dict(orient="records"))
+    if isinstance(value, pd.Series):
+        return sanitize_for_json(value.to_list())
+    if hasattr(value, "item"):
+        return sanitize_for_json(value.item())
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    return value
+
+
+def _load_json_rows(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return payload if isinstance(payload, list) else []
+
+
+def _load_list_item_rows(outputs_dir: Path, as_of_date: str) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    multi_path = outputs_dir / "lists" / f"multi_lists_{as_of_date}.json"
+    if multi_path.exists():
+        payload = json.loads(multi_path.read_text(encoding="utf-8"))
+        for list_payload in payload.get("lists", []) if isinstance(payload, dict) else []:
+            items = list_payload.get("items", []) if isinstance(list_payload, dict) else []
+            rows.extend(item for item in items if isinstance(item, dict))
+    if rows:
+        return rows
+    for path in (outputs_dir / "lists").glob(f"*_{as_of_date}.json"):
+        if path.name.startswith("multi_lists_"):
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        items = payload.get("items", []) if isinstance(payload, dict) else []
+        rows.extend(item for item in items if isinstance(item, dict))
+    return rows
+
+
+def _normalize_factor_source(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty or "symbol" not in frame.columns:
+        return pd.DataFrame()
+    flattened = pd.DataFrame([_flatten_record(row) for row in frame.to_dict(orient="records")])
+    if "symbol" not in flattened.columns:
+        return pd.DataFrame()
+    result = pd.DataFrame({"symbol": flattened["symbol"].astype(str)})
+    alias_map = {
+        "total_score": ["total_score", "score_breakdown.total_score", "scores.total_score", "factor_values.total_score"],
+        "momentum_score": ["momentum_score", "score_breakdown.momentum_score", "scores.momentum_score", "factor_values.momentum_score"],
+        "trend_score": ["trend_score", "score_breakdown.trend_score", "scores.trend_score", "factor_values.trend_score"],
+        "relative_strength_score": ["relative_strength_score", "score_breakdown.relative_strength_score", "scores.relative_strength_score", "factor_values.relative_strength_score"],
+        "risk_score": ["risk_score", "score_breakdown.risk_score", "scores.risk_score", "factor_values.risk_score"],
+        "liquidity_score": ["liquidity_score", "score_breakdown.liquidity_score", "scores.liquidity_score", "factor_values.liquidity_score"],
+        "volatility": ["volatility", "volatility_20d", "volatility_60d"],
+        "drawdown": ["drawdown", "max_drawdown", "max_drawdown_20d", "max_drawdown_60d"],
+        "amount": ["amount", "avg_amount_20d", "avg_amount_60d"],
+        "volume": ["volume", "avg_volume_20d", "avg_volume_60d"],
+    }
+    for output_column, candidates in alias_map.items():
+        series = _first_available_numeric(flattened, candidates)
+        if series is not None:
+            result[output_column] = series
+    return result
+
+
+def _merge_factor_frames(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    valid = [frame for frame in frames if frame is not None and not frame.empty and "symbol" in frame.columns]
+    if not valid:
+        return pd.DataFrame()
+    merged = valid[0].drop_duplicates("symbol").set_index("symbol")
+    for frame in valid[1:]:
+        current = frame.drop_duplicates("symbol").set_index("symbol")
+        merged = merged.combine_first(current)
+    return merged.reset_index()
+
+
+def _flatten_record(row: dict[str, object], *, prefix: str = "") -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in row.items():
+        name = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, dict):
+            result.update(_flatten_record(value, prefix=name))
+        else:
+            result[name] = value
+    return result
+
+
+def _first_available_numeric(frame: pd.DataFrame, candidates: list[str]) -> pd.Series | None:
+    result: pd.Series | None = None
+    for column in candidates:
+        if column not in frame.columns:
+            continue
+        current = pd.to_numeric(frame[column], errors="coerce")
+        result = current if result is None else result.combine_first(current)
+    return result
 
 
 def _markdown_report(result: dict[str, object]) -> str:
@@ -178,4 +300,3 @@ def _markdown_report(result: dict[str, object]) -> str:
             f"- Valid future labels: {summary.get('valid_future_count')}",
         ]
     )
-

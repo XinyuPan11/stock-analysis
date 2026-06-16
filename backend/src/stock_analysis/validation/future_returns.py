@@ -46,7 +46,7 @@ def calculate_future_return_label(
         return {**base, "data_quality": "missing_price"}
 
     future_return = (exit_price / entry_price) - 1.0
-    benchmark_return = _benchmark_return(benchmark_history, as_of_date=as_of_date, horizon_days=horizon_days)
+    benchmark_return, benchmark_quality = _benchmark_return(benchmark_history, as_of_date=as_of_date, horizon_days=horizon_days)
     future_excess_return = None if benchmark_return is None else future_return - benchmark_return
     drawdown = _max_drawdown(entry_price, future_window["validation_price"])
 
@@ -58,6 +58,7 @@ def calculate_future_return_label(
         "benchmark_return": benchmark_return,
         "future_excess_return": future_excess_return,
         "outperformed_benchmark": None if future_excess_return is None else future_excess_return > 0,
+        "benchmark_data_quality": benchmark_quality,
         "future_top_quantile": False,
         "max_drawdown_during_holding": drawdown,
         "data_quality": "ok",
@@ -103,6 +104,39 @@ def load_cached_price_history(
     return pd.read_csv(path, dtype={"symbol": str, "trade_date": str, "source": str})
 
 
+def load_cached_benchmark_history(
+    cache_dir: str | Path,
+    *,
+    provider: str,
+    benchmark: str,
+) -> tuple[pd.DataFrame, str, str]:
+    """Read a cached benchmark using known aliases. This never fetches data."""
+
+    aliases = benchmark_aliases(benchmark)
+    for symbol in aliases:
+        frame = load_cached_price_history(cache_dir, provider=provider, symbol=symbol, dataset="index_daily", adjusted=False)
+        if not frame.empty:
+            return frame, symbol, "ok"
+    return pd.DataFrame(), aliases[0], "benchmark_missing"
+
+
+def benchmark_aliases(benchmark: str) -> list[str]:
+    value = str(benchmark or "").strip()
+    upper = value.upper()
+    aliases = {
+        "CSI300": ["sh.000300", "CSI300", "000300.SH"],
+        "沪深300": ["sh.000300", "CSI300", "000300.SH"],
+        "000300": ["sh.000300", "CSI300", "000300.SH"],
+        "SH.000300": ["sh.000300", "CSI300", "000300.SH"],
+        "000300.SH": ["sh.000300", "CSI300", "000300.SH"],
+    }.get(upper, [value])
+    result: list[str] = []
+    for alias in aliases:
+        if alias and alias not in result:
+            result.append(alias)
+    return result or [value]
+
+
 def cached_price_path(
     cache_dir: str | Path,
     *,
@@ -127,6 +161,7 @@ def _base_label(symbol: str, as_of_date: str, horizon_days: int) -> dict[str, ob
         "benchmark_return": None,
         "future_excess_return": None,
         "outperformed_benchmark": None,
+        "benchmark_data_quality": "benchmark_missing",
         "future_top_quantile": False,
         "max_drawdown_during_holding": None,
         "data_quality": "missing_price",
@@ -147,9 +182,9 @@ def _prepare_price_history(frame: pd.DataFrame | None) -> pd.DataFrame:
     return result.sort_values("trade_date").drop_duplicates("trade_date").reset_index(drop=True)
 
 
-def _benchmark_return(benchmark_history: pd.DataFrame | None, *, as_of_date: str, horizon_days: int) -> float | None:
+def _benchmark_return(benchmark_history: pd.DataFrame | None, *, as_of_date: str, horizon_days: int) -> tuple[float | None, str]:
     if benchmark_history is None or benchmark_history.empty:
-        return None
+        return None, "benchmark_missing"
     label = calculate_future_return_label(
         "benchmark",
         benchmark_history,
@@ -158,7 +193,9 @@ def _benchmark_return(benchmark_history: pd.DataFrame | None, *, as_of_date: str
         benchmark_history=None,
     )
     value = label.get("future_return")
-    return None if value is None else float(value)
+    if value is None:
+        return None, f"benchmark_{label.get('data_quality', 'missing_price')}"
+    return float(value), "ok"
 
 
 def _max_drawdown(entry_price: float, prices: pd.Series) -> float | None:
@@ -188,4 +225,3 @@ def _safe_float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-

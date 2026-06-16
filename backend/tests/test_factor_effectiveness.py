@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from stock_analysis.validation.factor_effectiveness import evaluate_factor_effectiveness
+from stock_analysis.validation.walk_forward import load_factor_rows_for_validation
 
 
 class FactorEffectivenessTests(unittest.TestCase):
@@ -45,7 +47,32 @@ class FactorEffectivenessTests(unittest.TestCase):
 
         self.assertIn("missing_factor", result[0]["notes"])
 
+    def test_factor_rows_can_merge_scores_from_labels_and_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            outputs = root / "outputs"
+            (outputs / "labels").mkdir(parents=True)
+            (outputs / "daily").mkdir(parents=True)
+            (outputs / "lists").mkdir(parents=True)
+            _write_json(outputs / "labels" / "stock_labels_2024-01-31.json", [{"symbol": "AAA", "total_score": 90, "score_breakdown": {"momentum_score": 80}}])
+            _write_json(outputs / "daily" / "candidates_2024-01-31.json", [{"symbol": "AAA", "trend_score": 70, "relative_strength_score": 60}])
+            _write_json(outputs / "daily" / "factors_2024-01-31.json", [{"symbol": "AAA", "volatility_20d": 0.2, "max_drawdown": -0.1, "avg_amount_20d": 1000}])
+            _write_json(outputs / "lists" / "multi_lists_2024-01-31.json", {"lists": [{"items": [{"symbol": "AAA", "risk_score": 50, "liquidity_score": 40}]}]})
+
+            rows = load_factor_rows_for_validation(outputs, "2024-01-31", pd.DataFrame([{"symbol": "AAA"}]))
+
+        self.assertIn("total_score", rows.columns)
+        self.assertIn("momentum_score", rows.columns)
+        self.assertIn("trend_score", rows.columns)
+        self.assertIn("volatility", rows.columns)
+        self.assertEqual(float(rows.iloc[0]["total_score"]), 90)
+
+
+def _write_json(path: Path, payload: object) -> None:
+    import json
+
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
 
 if __name__ == "__main__":
     unittest.main()
-

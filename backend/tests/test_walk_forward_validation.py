@@ -72,8 +72,35 @@ class WalkForwardValidationTests(unittest.TestCase):
             self.assertIn('"status": "dry_run"', completed.stdout)
             self.assertFalse((root / "outputs" / "validation").exists())
 
+    def test_write_output_json_contains_no_nan_or_infinity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_fixture(root, benchmark_symbol="sh.000300")
 
-def _write_fixture(root: Path) -> None:
+            result = run_walk_forward_validation(
+                WalkForwardConfig(
+                    as_of_date="2024-01-31",
+                    horizon_days=1,
+                    outputs_dir=root / "outputs",
+                    cache_dir=root / "cache",
+                    list_ids=("trend_leaders",),
+                    limit=2,
+                    dry_run=False,
+                )
+            )
+
+            for path in result["outputs"].values():
+                if str(path).endswith(".json"):
+                    text = Path(path).read_text(encoding="utf-8")
+                    self.assertNotIn("NaN", text)
+                    self.assertNotIn("Infinity", text)
+
+            labels = {row["symbol"]: row for row in result["future_labels"]}
+            self.assertEqual(labels["AAA"]["benchmark_data_quality"], "ok")
+            self.assertIsNotNone(labels["AAA"]["future_excess_return"])
+
+
+def _write_fixture(root: Path, *, benchmark_symbol: str = "CSI300") -> None:
     outputs = root / "outputs"
     cache = root / "cache"
     (outputs / "labels").mkdir(parents=True)
@@ -96,7 +123,7 @@ def _write_fixture(root: Path) -> None:
     )
     _write_price(cache / "baostock" / "stock_daily" / "adjusted" / "AAA.csv", "AAA", [("2024-01-31", 100), ("2024-02-01", 110)])
     _write_price(cache / "baostock" / "stock_daily" / "adjusted" / "BBB.csv", "BBB", [("2024-01-31", 100), ("2024-02-01", 95)])
-    _write_price(cache / "baostock" / "index_daily" / "raw" / "CSI300.csv", "CSI300", [("2024-01-31", 1000), ("2024-02-01", 1010)])
+    _write_price(cache / "baostock" / "index_daily" / "raw" / f"{benchmark_symbol}.csv", benchmark_symbol, [("2024-01-31", 1000), ("2024-02-01", 1010)])
 
 
 def _write_price(path: Path, symbol: str, rows: list[tuple[str, float]]) -> None:

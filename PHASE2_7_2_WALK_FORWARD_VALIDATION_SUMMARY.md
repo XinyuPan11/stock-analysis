@@ -78,6 +78,30 @@ Result:
 
 This is expected for the current fixed historical cache because it ends at the as-of date and does not contain post-2024-01-31 future windows.
 
+## First Real Validation Observation
+
+A first controlled real validation run completed and produced 60D output files, but the sample was still under-covered:
+
+- `symbol_count`: `50`
+- `valid_future_count`: `9`
+- `insufficient_future_window`: `41`
+- 60D outputs generated under `outputs/validation`
+
+Issues found from that run:
+
+- `average_excess_return` and `outperform_rate` were often `null` because the benchmark cache was not always mapped correctly.
+- `best_cases` / `worst_cases` could contain `NaN` in JSON output when excess return was unavailable.
+- `factor_effectiveness` could become all `missing_factor` because factor rows were not merged from all available Phase 2.7 output sources.
+- Blind `prewarm_market_cache.py --limit N` can spend time on symbols outside the validation universe and still miss symbols needed by validation.
+
+Fixes added after the first real validation:
+
+- Benchmark aliases now map `CSI300` to cached symbols such as `sh.000300` before falling back to `CSI300`.
+- Future labels now include explicit `benchmark_data_quality`, such as `ok` or `benchmark_missing`.
+- JSON outputs sanitize `NaN`, `inf`, and `-inf` to `null`.
+- Factor effectiveness now merges fields from `stock_labels`, `candidate_labels`, `daily candidates`, `daily factors`, and list items.
+- A targeted cache plan tool was added to generate the exact symbols that need future-window cache refresh.
+
 ## Remaining Limitations
 
 - This is a single as-of-date framework in the first pass.
@@ -103,3 +127,4 @@ Key boundaries:
 - 20D validation should prepare cache through at least `2024-03-15`.
 - 60D validation should prepare cache through preferably `2024-05-31`.
 - Validation remains dry-run/read-only by default.
+- Use `backend\scripts\generate_validation_cache_plan.py` before prewarm to avoid blindly refreshing unrelated symbols.

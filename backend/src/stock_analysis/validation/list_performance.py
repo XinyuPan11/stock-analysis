@@ -125,7 +125,17 @@ def _mean_or_none(series: pd.Series) -> float | None:
 def _case_rows(frame: pd.DataFrame) -> list[dict[str, object]]:
     columns = ["symbol", "future_return", "future_excess_return", "max_drawdown_during_holding", "data_quality"]
     existing = [column for column in columns if column in frame.columns]
-    return frame.loc[:, existing].to_dict(orient="records")
+    return [_clean_record(row) for row in frame.loc[:, existing].to_dict(orient="records")]
+
+
+def _clean_record(row: dict[str, object]) -> dict[str, object]:
+    cleaned: dict[str, object] = {}
+    for key, value in row.items():
+        if isinstance(value, float) and pd.isna(value):
+            cleaned[key] = None
+        else:
+            cleaned[key] = value
+    return cleaned
 
 
 def _to_frame(value: pd.DataFrame | Iterable[dict[str, object]]) -> pd.DataFrame:

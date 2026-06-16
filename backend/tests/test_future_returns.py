@@ -19,10 +19,20 @@ class FutureReturnTests(unittest.TestCase):
         label = calculate_future_return_label("AAA", stock, as_of_date="2024-01-31", horizon_days=2, benchmark_history=benchmark)
 
         self.assertEqual(label["data_quality"], "ok")
+        self.assertEqual(label["benchmark_data_quality"], "ok")
         self.assertAlmostEqual(label["future_return"], 0.10)
         self.assertAlmostEqual(label["benchmark_return"], 0.01)
         self.assertAlmostEqual(label["future_excess_return"], 0.09)
         self.assertTrue(label["outperformed_benchmark"])
+
+    def test_benchmark_missing_is_explicitly_marked(self) -> None:
+        stock = _price_frame("AAA", [("2024-01-31", 100), ("2024-02-01", 105)])
+
+        label = calculate_future_return_label("AAA", stock, as_of_date="2024-01-31", horizon_days=1, benchmark_history=None)
+
+        self.assertEqual(label["data_quality"], "ok")
+        self.assertEqual(label["benchmark_data_quality"], "benchmark_missing")
+        self.assertIsNone(label["future_excess_return"])
 
     def test_insufficient_future_window_is_reported(self) -> None:
         stock = _price_frame("AAA", [("2024-01-31", 100), ("2024-02-01", 105)])
@@ -81,4 +91,3 @@ def _price_frame(symbol: str, rows: list[tuple[str, float]]) -> pd.DataFrame:
 
 if __name__ == "__main__":
     unittest.main()
-
