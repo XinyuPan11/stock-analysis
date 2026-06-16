@@ -19,7 +19,7 @@ from stock_analysis.data.providers import AkShareProvider, BaoStockProvider, Mar
 from stock_analysis.data.service import MarketDataService
 
 
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a Phase 1 walk-forward A-share Top N backtest.")
     parser.add_argument("--provider", choices=["akshare", "baostock", "tushare"], default="baostock")
     parser.add_argument("--start-date", required=True)
@@ -28,7 +28,7 @@ def main() -> int:
     parser.add_argument("--rebalance-frequency", choices=["monthly", "weekly"], default="monthly")
     parser.add_argument("--top-n", type=int, default=10)
     parser.add_argument("--benchmark", choices=["CSI300"], default="CSI300")
-    parser.add_argument("--limit", type=int, default=50)
+    parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--batch-id", default="")
     parser.add_argument("--retry", type=int, default=0)
@@ -36,7 +36,13 @@ def main() -> int:
     parser.add_argument("--output-dir", default=str(REPO_ROOT / "outputs" / "backtests"))
     parser.add_argument("--error-output-dir", default=str(REPO_ROOT / "outputs" / "errors"))
     parser.add_argument("--transaction-cost-bps", type=float, default=10.0)
-    args = parser.parse_args()
+    parser.add_argument("--progress-log", default="")
+    parser.add_argument("--progress-every", type=int, default=100)
+    return parser.parse_args(argv)
+
+
+def main() -> int:
+    args = parse_args()
 
     provider = _build_provider(args.provider)
     service = MarketDataService(provider=provider, cache=LocalCsvCache(cache_dir=args.cache_dir))
@@ -58,6 +64,8 @@ def main() -> int:
             error_output_dir=args.error_output_dir,
             transaction_cost_bps=args.transaction_cost_bps,
             provider=provider.source,
+            progress_log_path=args.progress_log,
+            progress_every=args.progress_every,
         ),
     )
 
@@ -75,6 +83,8 @@ def main() -> int:
         "cache_dir": str(Path(args.cache_dir).resolve()),
         "output_dir": str(Path(args.output_dir).resolve()),
         "error_output_dir": str(Path(args.error_output_dir).resolve()),
+        "progress_log": str(Path(args.progress_log).resolve()) if args.progress_log else "",
+        "progress_every": args.progress_every,
         "summary": result.summary,
         "output_paths": result.output_paths,
         "fetch_errors": result.fetch_errors[:20],

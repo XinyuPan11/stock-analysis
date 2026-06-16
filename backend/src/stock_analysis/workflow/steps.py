@@ -48,8 +48,6 @@ def prewarm_step(config: DailyWorkflowConfig) -> WorkflowStep:
         config.end_date,
         "--include-lookback-days",
         str(config.include_lookback_days),
-        "--limit",
-        str(config.limit),
         "--batch-size",
         str(config.batch_size),
         "--cache-dir",
@@ -61,6 +59,7 @@ def prewarm_step(config: DailyWorkflowConfig) -> WorkflowStep:
         "--retry",
         str(config.retry),
     ]
+    _append_limit(command, config.limit)
     if config.resume:
         command.append("--resume")
     return WorkflowStep(
@@ -72,30 +71,36 @@ def prewarm_step(config: DailyWorkflowConfig) -> WorkflowStep:
 
 
 def research_step(config: DailyWorkflowConfig) -> WorkflowStep:
+    command = [
+        config.python_executable,
+        r"backend\scripts\run_daily_research.py",
+        "--provider",
+        config.provider,
+        "--start-date",
+        config.start_date,
+        "--end-date",
+        config.end_date,
+        "--benchmark",
+        config.benchmark,
+        "--top-n",
+        str(config.top_n),
+        "--cache-dir",
+        str(config.cache_root),
+        "--output-dir",
+        str(config.daily_output_dir),
+        "--retry",
+        str(config.retry),
+        "--progress-log",
+        str(config.workflow_output_dir / f"daily_research_progress_{config.end_date}.log"),
+        "--progress-every",
+        str(config.daily_progress_every),
+    ]
+    if config.symbol_timeout_seconds is not None:
+        command.extend(["--symbol-timeout-seconds", str(config.symbol_timeout_seconds)])
+    _append_limit(command, config.limit)
     return WorkflowStep(
         name="daily_research",
-        command=[
-            config.python_executable,
-            r"backend\scripts\run_daily_research.py",
-            "--provider",
-            config.provider,
-            "--start-date",
-            config.start_date,
-            "--end-date",
-            config.end_date,
-            "--benchmark",
-            config.benchmark,
-            "--top-n",
-            str(config.top_n),
-            "--limit",
-            str(config.limit),
-            "--cache-dir",
-            str(config.cache_root),
-            "--output-dir",
-            str(config.daily_output_dir),
-            "--retry",
-            str(config.retry),
-        ],
+        command=command,
         output_paths=[
             config.daily_output_dir / f"candidates_{config.end_date}.json",
             config.daily_output_dir / f"summary_{config.end_date}.json",
@@ -134,36 +139,40 @@ def report_step(config: DailyWorkflowConfig) -> WorkflowStep:
 
 def backtest_step(config: DailyWorkflowConfig) -> WorkflowStep:
     date = config.end_date
+    command = [
+        config.python_executable,
+        r"backend\scripts\run_backtest.py",
+        "--provider",
+        config.provider,
+        "--start-date",
+        config.start_date,
+        "--end-date",
+        config.end_date,
+        "--lookback-days",
+        str(config.lookback_days),
+        "--rebalance-frequency",
+        config.rebalance_frequency,
+        "--top-n",
+        str(config.backtest_top_n),
+        "--benchmark",
+        config.benchmark,
+        "--cache-dir",
+        str(config.cache_root),
+        "--output-dir",
+        str(config.backtests_output_dir),
+        "--transaction-cost-bps",
+        str(config.transaction_cost_bps),
+        "--retry",
+        str(config.retry),
+        "--progress-log",
+        str(config.workflow_output_dir / f"backtest_progress_{date}.log"),
+        "--progress-every",
+        "100",
+    ]
+    _append_limit(command, config.limit)
     return WorkflowStep(
         name="backtest",
-        command=[
-            config.python_executable,
-            r"backend\scripts\run_backtest.py",
-            "--provider",
-            config.provider,
-            "--start-date",
-            config.start_date,
-            "--end-date",
-            config.end_date,
-            "--lookback-days",
-            str(config.lookback_days),
-            "--rebalance-frequency",
-            config.rebalance_frequency,
-            "--top-n",
-            str(config.backtest_top_n),
-            "--benchmark",
-            config.benchmark,
-            "--limit",
-            str(config.limit),
-            "--cache-dir",
-            str(config.cache_root),
-            "--output-dir",
-            str(config.backtests_output_dir),
-            "--transaction-cost-bps",
-            str(config.transaction_cost_bps),
-            "--retry",
-            str(config.retry),
-        ],
+        command=command,
         output_paths=[
             config.backtests_output_dir / f"backtest_summary_{date}.json",
             config.backtests_output_dir / f"backtest_report_{date}.md",
@@ -195,3 +204,8 @@ def command_text(command: list[str] | None) -> str:
     if not command:
         return ""
     return " ".join(command)
+
+
+def _append_limit(command: list[str], limit: int | None) -> None:
+    if limit is not None:
+        command.extend(["--limit", str(limit)])

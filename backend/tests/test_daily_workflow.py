@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 import tempfile
@@ -123,6 +124,7 @@ class DailyWorkflowTests(unittest.TestCase):
             "end_date",
             "benchmark",
             "limit",
+            "full_market",
             "top_n",
             "steps",
             "step_statuses",
@@ -144,6 +146,119 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertIn("workflow started", log_text)
         self.assertIn("daily_research ok", log_text)
 
+    def test_workflow_without_limit_does_not_pass_limit_to_child_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = _config(temp_dir, limit=None)
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], cwd: Path) -> CommandResult:
+                commands.append(command.copy())
+                _materialize_outputs(config, Path(command[1]).name)
+                return CommandResult(returncode=0)
+
+            summary = run_daily_workflow(config, runner=runner)
+
+        limited_scripts = {"prewarm_market_cache.py", "run_daily_research.py", "run_backtest.py"}
+        for command in commands:
+            if Path(command[1]).name in limited_scripts:
+                self.assertNotIn("--limit", command)
+        self.assertIsNone(summary["limit"])
+        self.assertTrue(summary["full_market"])
+
+    def test_workflow_with_limit_passes_limit_to_child_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = _config(temp_dir, limit=1500)
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], cwd: Path) -> CommandResult:
+                commands.append(command.copy())
+                _materialize_outputs(config, Path(command[1]).name)
+                return CommandResult(returncode=0)
+
+            summary = run_daily_workflow(config, runner=runner)
+
+        limited_scripts = {"prewarm_market_cache.py", "run_daily_research.py", "run_backtest.py"}
+        for command in commands:
+            if Path(command[1]).name in limited_scripts:
+                self.assertIn("--limit", command)
+                limit_index = command.index("--limit")
+                self.assertEqual(command[limit_index + 1], "1500")
+        self.assertEqual(summary["limit"], 1500)
+        self.assertFalse(summary["full_market"])
+
+    def test_daily_research_command_includes_progress_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = _config(temp_dir, skip_prewarm=True, skip_backtest=True, daily_progress_every=1, symbol_timeout_seconds=60.0)
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], cwd: Path) -> CommandResult:
+                commands.append(command.copy())
+                _materialize_outputs(config, Path(command[1]).name)
+                return CommandResult(returncode=0)
+
+            run_daily_workflow(config, runner=runner)
+
+        research_command = next(command for command in commands if Path(command[1]).name == "run_daily_research.py")
+        self.assertIn("--progress-log", research_command)
+        progress_log_index = research_command.index("--progress-log")
+        self.assertTrue(research_command[progress_log_index + 1].endswith("daily_research_progress_2024-01-31.log"))
+        self.assertIn("--progress-every", research_command)
+        progress_every_index = research_command.index("--progress-every")
+        self.assertEqual(research_command[progress_every_index + 1], "1")
+        self.assertIn("--symbol-timeout-seconds", research_command)
+        timeout_index = research_command.index("--symbol-timeout-seconds")
+        self.assertEqual(research_command[timeout_index + 1], "60.0")
+
+    def test_backtest_command_includes_progress_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = _config(temp_dir, skip_prewarm=True, skip_research=True, skip_report=True)
+            commands: list[list[str]] = []
+
+            def runner(command: list[str], cwd: Path) -> CommandResult:
+                commands.append(command.copy())
+                _materialize_outputs(config, Path(command[1]).name)
+                return CommandResult(returncode=0)
+
+            run_daily_workflow(config, runner=runner)
+
+        backtest_command = next(command for command in commands if Path(command[1]).name == "run_backtest.py")
+        self.assertIn("--progress-log", backtest_command)
+        progress_log_index = backtest_command.index("--progress-log")
+        self.assertTrue(backtest_command[progress_log_index + 1].endswith("backtest_progress_2024-01-31.log"))
+        self.assertIn("--progress-every", backtest_command)
+
+    def test_script_parsers_default_limit_to_none_and_keep_explicit_limit(self) -> None:
+        script_args = {
+            "run_daily_workflow.py": ["--start-date", "2023-01-01", "--end-date", "2024-01-31"],
+            "prewarm_market_cache.py": ["--start-date", "2023-01-01", "--end-date", "2024-01-31"],
+            "run_daily_research.py": ["--start-date", "2023-01-01", "--end-date", "2024-01-31"],
+            "run_backtest.py": ["--start-date", "2023-01-01", "--end-date", "2024-01-31"],
+        }
+
+        for script_name, args in script_args.items():
+            with self.subTest(script=script_name):
+                module = _load_script_module(script_name)
+                self.assertIsNone(module.parse_args(args).limit)
+                self.assertEqual(module.parse_args([*args, "--limit", "1500"]).limit, 1500)
+
+    def test_daily_workflow_parser_supports_daily_progress_and_symbol_timeout(self) -> None:
+        module = _load_script_module("run_daily_workflow.py")
+        args = module.parse_args(
+            [
+                "--start-date",
+                "2023-01-01",
+                "--end-date",
+                "2024-01-31",
+                "--daily-progress-every",
+                "1",
+                "--symbol-timeout-seconds",
+                "45",
+            ]
+        )
+
+        self.assertEqual(args.daily_progress_every, 1)
+        self.assertEqual(args.symbol_timeout_seconds, 45.0)
+
 
 def _config(root: str, **overrides: object) -> DailyWorkflowConfig:
     kwargs = {
@@ -160,6 +275,16 @@ def _config(root: str, **overrides: object) -> DailyWorkflowConfig:
     }
     kwargs.update(overrides)
     return DailyWorkflowConfig(**kwargs)
+
+
+def _load_script_module(script_name: str):
+    path = Path(__file__).resolve().parents[1] / "scripts" / script_name
+    spec = importlib.util.spec_from_file_location(f"test_{Path(script_name).stem}", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load script module: {script_name}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _successful_runner(config: DailyWorkflowConfig, calls: list[str]):

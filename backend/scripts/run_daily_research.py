@@ -21,7 +21,7 @@ from stock_analysis.data.service import MarketDataService
 from stock_analysis.research.pipeline import ResearchPipelineConfig, run_research_pipeline
 
 
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Phase 1 daily A-share research pipeline.")
     parser.add_argument("--provider", choices=["akshare", "baostock", "tushare"], default="baostock")
     parser.add_argument("--start-date", default=None)
@@ -30,14 +30,21 @@ def main() -> int:
     parser.add_argument("--lookback-years", type=int, default=None)
     parser.add_argument("--benchmark", choices=["CSI300"], default="CSI300")
     parser.add_argument("--top-n", type=int, default=20)
-    parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--batch-id", default="")
     parser.add_argument("--retry", type=int, default=0)
     parser.add_argument("--cache-dir", default=str(REPO_ROOT / "data" / "cache" / "daily-research"))
     parser.add_argument("--output-dir", default=str(REPO_ROOT / "outputs" / "daily"))
     parser.add_argument("--error-output-dir", default=str(REPO_ROOT / "outputs" / "errors"))
-    args = parser.parse_args()
+    parser.add_argument("--progress-log", default=None)
+    parser.add_argument("--progress-every", type=int, default=100)
+    parser.add_argument("--symbol-timeout-seconds", type=float, default=60.0)
+    return parser.parse_args(argv)
+
+
+def main() -> int:
+    args = parse_args()
 
     start_date = _resolve_start_date(args.start_date, args.end_date, args.lookback_days, args.lookback_years)
     provider = _build_provider(args.provider)
@@ -56,6 +63,9 @@ def main() -> int:
             retry=args.retry,
             output_dir=args.output_dir,
             error_output_dir=args.error_output_dir,
+            progress_log_path=args.progress_log,
+            progress_every=args.progress_every,
+            symbol_timeout_seconds=args.symbol_timeout_seconds,
         ),
     )
 
@@ -73,6 +83,9 @@ def main() -> int:
         "cache_dir": str(Path(args.cache_dir).resolve()),
         "output_dir": str(Path(args.output_dir).resolve()),
         "error_output_dir": str(Path(args.error_output_dir).resolve()),
+        "progress_log": str(Path(args.progress_log).resolve()) if args.progress_log else "",
+        "progress_every": args.progress_every,
+        "symbol_timeout_seconds": args.symbol_timeout_seconds,
         "summary": result.summary,
         "fetch_errors": result.fetch_errors[:20],
         "candidates": _records(result.candidates),

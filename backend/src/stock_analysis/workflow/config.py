@@ -11,7 +11,7 @@ class DailyWorkflowConfig:
     start_date: str = "2023-01-01"
     end_date: str = "2024-01-31"
     benchmark: str = "CSI300"
-    limit: int = 50
+    limit: int | None = None
     top_n: int = 10
     backtest_top_n: int = 5
     lookback_days: int = 120
@@ -21,6 +21,8 @@ class DailyWorkflowConfig:
     batch_size: int = 10
     sleep_seconds: float = 0.5
     retry: int = 1
+    daily_progress_every: int = 100
+    symbol_timeout_seconds: float | None = 60.0
     resume: bool = False
     cache_dir: str = "data/cache/daily-use"
     output_dir: str = "outputs"

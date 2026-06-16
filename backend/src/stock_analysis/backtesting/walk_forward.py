@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
+import time
 from typing import Protocol
 
 import pandas as pd
@@ -64,7 +65,7 @@ class WalkForwardConfig:
     rebalance_frequency: str = "monthly"
     top_n: int = 10
     benchmark: str = "CSI300"
-    limit: int = 50
+    limit: int | None = None
     offset: int = 0
     batch_id: str = ""
     retry: int = 0
@@ -75,6 +76,8 @@ class WalkForwardConfig:
     provider: str = ""
     adjusted: bool = True
     filter_config: FilterConfig | None = None
+    progress_log_path: str | Path | None = None
+    progress_every: int = 100
 
 
 @dataclass(frozen=True)
@@ -93,20 +96,42 @@ def run_walk_forward_backtest(
 ) -> WalkForwardBacktestResult:
     """Run an interpretable Top N walk-forward backtest without future factor data."""
 
+    timer = time.perf_counter()
+    progress = _progress_logger(config)
+    progress(
+        "backtest start "
+        f"provider={config.provider} start_date={config.start_date} end_date={config.end_date} "
+        f"top_n={config.top_n} limit={_format_progress_value(config.limit)}"
+    )
     _validate_config(config)
     history_start = _history_start(config.start_date, config.lookback_days)
+    progress(f"stock universe loading start history_start={history_start}")
     full_universe = service.get_stock_universe()
-    universe = full_universe.iloc[config.offset : config.offset + config.limit].reset_index(drop=True)
+    progress(f"stock universe loaded universe_count={len(full_universe)}")
+    universe = _select_universe_batch(full_universe, config)
+    progress(
+        "stock universe batch selected "
+        f"offset={config.offset} selected_count={len(universe)} full_market={config.limit is None}"
+    )
     fetch_errors: list[dict[str, str]] = []
     skipped_symbols: list[dict[str, str]] = []
 
+    progress(f"benchmark loading start benchmark={config.benchmark}")
     benchmark = _fetch_benchmark(service, config, history_start, fetch_errors)
+    progress(f"benchmark loading end rows={len(benchmark)} fetch_errors={len(fetch_errors)}")
     rebalance_dates = _rebalance_dates(benchmark, config.start_date, config.end_date, config.rebalance_frequency)
+    progress(f"rebalance dates count count={len(rebalance_dates)} frequency={config.rebalance_frequency}")
     if universe.empty or benchmark.empty or not rebalance_dates:
+        progress("backtest empty result reason=empty_universe_or_benchmark")
+        progress(f"backtest end status=empty elapsed_seconds={time.perf_counter() - timer:.4f}")
         return _empty_result(config, universe_count=len(full_universe), fetch_errors=fetch_errors, warnings=["empty_universe_or_benchmark"])
 
-    all_daily = _fetch_stock_histories(service, universe, history_start, config, fetch_errors)
+    progress(f"stock history loading start symbol_count={len(universe)} progress_every={config.progress_every}")
+    all_daily = _fetch_stock_histories(service, universe, history_start, config, fetch_errors, progress)
+    progress(f"stock history loading end rows={len(all_daily)} fetch_errors={len(fetch_errors)}")
     if all_daily.empty:
+        progress("backtest empty result reason=empty_stock_price_history")
+        progress(f"backtest end status=empty elapsed_seconds={time.perf_counter() - timer:.4f}")
         return _empty_result(config, universe_count=len(full_universe), fetch_errors=fetch_errors, warnings=["empty_stock_price_history"])
 
     equity_rows: list[dict[str, object]] = []
@@ -119,12 +144,15 @@ def run_walk_forward_backtest(
     warnings: list[str] = []
 
     for index, rebalance_date in enumerate(rebalance_dates):
+        progress(f"rebalance progress index={index + 1} total={len(rebalance_dates)} date={rebalance_date}")
         period_end = rebalance_dates[index + 1] if index + 1 < len(rebalance_dates) else config.end_date
         period_dates = _period_dates(benchmark, rebalance_date, period_end)
         if not period_dates:
             warnings.append(f"empty_holding_period:{rebalance_date}")
+            progress(f"rebalance skipped date={rebalance_date} reason=empty_holding_period")
             continue
 
+        progress(f"candidate universe start date={rebalance_date} universe_count={len(universe)}")
         candidates, period_skips, period_warnings = _candidates_on_rebalance(
             universe,
             all_daily,
@@ -134,11 +162,18 @@ def run_walk_forward_backtest(
         )
         skipped_symbols.extend(period_skips)
         warnings.extend(period_warnings)
+        progress(
+            "candidate universe end "
+            f"date={rebalance_date} candidate_count={len(candidates)} top_n={config.top_n} "
+            f"period_skips={len(period_skips)} warnings={len(period_warnings)}"
+        )
         if candidates.empty:
             warnings.append(f"empty_candidates:{rebalance_date}")
             previous_weights = {}
+            progress(f"rebalance skipped date={rebalance_date} reason=empty_candidates")
             continue
 
+        progress(f"portfolio construction start date={rebalance_date} holding_count={len(candidates)}")
         weights = {str(row["symbol"]): 1.0 / len(candidates) for _, row in candidates.iterrows()}
         turnover = _turnover(previous_weights, weights)
         transaction_cost = turnover * float(config.transaction_cost_bps) / 10_000.0
@@ -146,7 +181,12 @@ def run_walk_forward_backtest(
         hold_start = period_dates[0]
         hold_end = period_dates[-1]
         rebalance_rows.extend(_rebalance_rows(candidates, rebalance_date, hold_start, hold_end, weights, turnover, transaction_cost))
+        progress(
+            "portfolio construction end "
+            f"date={rebalance_date} turnover={turnover:.6f} transaction_cost={transaction_cost:.6f}"
+        )
 
+        progress(f"equity curve calculation start date={rebalance_date} period_days={len(period_dates)}")
         period_returns, holding_skips = _portfolio_period_returns(all_daily, weights, rebalance_date, period_dates)
         skipped_symbols.extend(holding_skips)
         benchmark_returns = _benchmark_period_returns(benchmark, rebalance_date, period_dates)
@@ -172,9 +212,14 @@ def run_walk_forward_backtest(
                 }
             )
         previous_weights = weights
+        progress(
+            "equity curve calculation end "
+            f"date={rebalance_date} rows={len(equity_rows)} holding_skips={len(holding_skips)}"
+        )
 
     equity_curve = pd.DataFrame(equity_rows, columns=EQUITY_CURVE_COLUMNS)
     rebalance_log = pd.DataFrame(rebalance_rows, columns=REBALANCE_LOG_COLUMNS)
+    progress(f"backtest summary generation start equity_rows={len(equity_curve)} rebalance_rows={len(rebalance_log)}")
     metrics, metric_warnings = calculate_backtest_metrics(
         equity_curve,
         rebalance_log,
@@ -182,14 +227,18 @@ def run_walk_forward_backtest(
     )
     warnings.extend(metric_warnings)
     summary = _summary(config, len(full_universe), metrics, fetch_errors, skipped_symbols, warnings)
-    output_paths = _write_outputs(summary, equity_curve, rebalance_log, config) if config.output_dir else {}
+    progress(f"backtest summary generation end warnings={len(warnings)} fetch_errors={len(fetch_errors)}")
+    output_paths = _write_outputs(summary, equity_curve, rebalance_log, config, progress) if config.output_dir else {}
     if config.error_output_dir and fetch_errors:
+        progress(f"backtest fetch error writing start error_count={len(fetch_errors)}")
         output_paths["failed_symbols_csv"] = _write_fetch_errors(fetch_errors, config.error_output_dir, config)
         summary["output_paths"] = output_paths
         if output_paths.get("summary_json"):
             Path(output_paths["summary_json"]).write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        progress(f"backtest fetch error writing end path={output_paths.get('failed_symbols_csv', '')}")
     if output_paths:
         summary["output_paths"] = output_paths
+    progress(f"backtest end status=ok elapsed_seconds={time.perf_counter() - timer:.4f}")
     return WalkForwardBacktestResult(
         summary=summary,
         equity_curve=equity_curve,
@@ -244,14 +293,22 @@ def _fetch_stock_histories(
     history_start: str,
     config: WalkForwardConfig,
     fetch_errors: list[dict[str, str]],
+    progress,
 ) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
-    for symbol in universe["symbol"].astype(str).tolist():
+    symbols = universe["symbol"].astype(str).tolist()
+    for index, symbol in enumerate(symbols, start=1):
         frame, error = _fetch_stock_daily_with_retry(service, symbol, history_start, config)
         if error:
             fetch_errors.append(error)
         elif frame is not None:
             frames.append(_safe_market_frame(frame))
+        if _should_report_progress(index, len(symbols), config.progress_every):
+            progress(
+                "stock history progress "
+                f"processed={index} total={len(symbols)} loaded_frames={len(frames)} "
+                f"fetch_errors={len(fetch_errors)} last_symbol={symbol}"
+            )
     if not frames:
         return pd.DataFrame(columns=MARKET_DATA_COLUMNS)
     return pd.concat(frames, ignore_index=True).sort_values(["symbol", "trade_date"]).reset_index(drop=True)
@@ -414,6 +471,7 @@ def _write_outputs(
     equity_curve: pd.DataFrame,
     rebalance_log: pd.DataFrame,
     config: WalkForwardConfig,
+    progress=lambda _message: None,
 ) -> dict[str, str]:
     output_dir = Path(config.output_dir or ".")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -421,9 +479,12 @@ def _write_outputs(
     summary_path = output_dir / f"backtest_summary_{safe_date}.json"
     equity_path = output_dir / f"backtest_equity_curve_{safe_date}.csv"
     rebalance_path = output_dir / f"backtest_rebalance_log_{safe_date}.csv"
+    progress(f"backtest output writing start output_dir={output_dir}")
     equity_curve.to_csv(equity_path, index=False, encoding="utf-8-sig")
     rebalance_log.to_csv(rebalance_path, index=False, encoding="utf-8-sig")
+    progress("backtest report generation start")
     report_paths = generate_backtest_report(summary, equity_curve, rebalance_log, output_dir=output_dir, as_of_date=config.end_date)
+    progress("backtest report generation end")
     output_paths = {
         "summary_json": str(summary_path.resolve()),
         "equity_curve_csv": str(equity_path.resolve()),
@@ -433,6 +494,7 @@ def _write_outputs(
     }
     summary["output_paths"] = output_paths
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    progress(f"backtest output writing end output_files={len(output_paths)}")
     return output_paths
 
 
@@ -478,7 +540,8 @@ def _summary(
         "start_date": pd.Timestamp(config.start_date).strftime("%Y-%m-%d"),
         "end_date": pd.Timestamp(config.end_date).strftime("%Y-%m-%d"),
         "offset": int(config.offset),
-        "limit": int(config.limit),
+        "limit": config.limit,
+        "full_market": config.limit is None,
         "batch_id": config.batch_id,
         "retry": int(config.retry),
         "universe_count": int(universe_count),
@@ -492,7 +555,8 @@ def _summary(
             "rebalance_frequency": config.rebalance_frequency,
             "top_n": int(config.top_n),
             "benchmark": config.benchmark,
-            "limit": int(config.limit),
+            "limit": config.limit,
+            "full_market": config.limit is None,
             "offset": int(config.offset),
             "batch_id": config.batch_id,
             "retry": int(config.retry),
@@ -550,6 +614,37 @@ def _history_start(start_date: str, lookback_days: int) -> str:
     return (parsed - pd.Timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
 
+def _select_universe_batch(universe: pd.DataFrame, config: WalkForwardConfig) -> pd.DataFrame:
+    if config.limit is None:
+        return universe.iloc[config.offset :].reset_index(drop=True)
+    return universe.iloc[config.offset : config.offset + config.limit].reset_index(drop=True)
+
+
+def _progress_logger(config: WalkForwardConfig):
+    path = Path(config.progress_log_path) if config.progress_log_path else None
+    if path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+
+    def log(message: str) -> None:
+        line = f"[{pd.Timestamp.now().strftime('%Y-%m-%dT%H:%M:%S')}] {message}"
+        print(line, flush=True)
+        if path:
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+
+    return log
+
+
+def _format_progress_value(value: object) -> str:
+    return "null" if value is None else str(value)
+
+
+def _should_report_progress(index: int, total: int, every: int) -> bool:
+    interval = max(1, int(every or 1))
+    return index == 1 or index == total or index % interval == 0
+
+
 def _validate_config(config: WalkForwardConfig) -> None:
     start = pd.to_datetime(config.start_date, errors="coerce")
     end = pd.to_datetime(config.end_date, errors="coerce")
@@ -561,7 +656,7 @@ def _validate_config(config: WalkForwardConfig) -> None:
         raise ValueError("lookback_days must be positive.")
     if config.top_n <= 0:
         raise ValueError("top_n must be positive.")
-    if config.limit <= 0:
+    if config.limit is not None and config.limit <= 0:
         raise ValueError("limit must be positive.")
     if config.offset < 0:
         raise ValueError("offset cannot be negative.")

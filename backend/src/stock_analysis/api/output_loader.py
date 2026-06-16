@@ -71,6 +71,17 @@ FACTOR_GROUP_ALIASES = {
 
 NO_FACTOR_EXPLANATIONS_MESSAGE = "暂无真实因子贡献表，请先生成 factor_explanations 输出。"
 NO_REPORTS_MESSAGE = "No reports found. Please generate research reports first."
+API_DISCLAIMER = "本系统仅用于个人研究和学习，不构成投资建议，不提供确定性交易指令或收益承诺。"
+SUPPORTED_RESEARCH_LIST_IDS = {
+    "high_confidence_candidates",
+    "trend_leaders",
+    "long_term_stable",
+    "breakout_watch",
+    "accumulation_watch",
+    "rebound_watch",
+    "high_risk_active",
+    "insufficient_data",
+}
 
 
 @dataclass(frozen=True)
@@ -101,6 +112,14 @@ class OutputLoader:
     def backtests_dir(self) -> Path:
         return self.outputs_dir / "backtests"
 
+    @property
+    def labels_dir(self) -> Path:
+        return self.outputs_dir / "labels"
+
+    @property
+    def lists_dir(self) -> Path:
+        return self.outputs_dir / "lists"
+
     def latest_daily_date(self) -> str | None:
         dates: set[str] = set()
         for prefix in ["candidates", "summary", "factors", "factor_explanations"]:
@@ -114,6 +133,14 @@ class OutputLoader:
     def latest_workflow_date(self) -> str | None:
         dates = self._dates_from_files(self.outputs_dir / "workflow", r"^workflow_summary_(\d{4}-\d{2}-\d{2})\.json$")
         return max(dates) if dates else None
+
+    def latest_label_date(self) -> str | None:
+        dates = self._dates_from_files(self.labels_dir, r"^candidate_labels_(\d{4}-\d{2}-\d{2})\.json$")
+        return max(dates) if dates else self.latest_daily_date()
+
+    def latest_list_date(self) -> str | None:
+        dates = self._dates_from_files(self.lists_dir, r"^multi_lists_(\d{4}-\d{2}-\d{2})\.json$")
+        return max(dates) if dates else self.latest_label_date()
 
     def latest(self) -> dict[str, Any]:
         as_of_date = self.latest_daily_date()
@@ -453,6 +480,221 @@ class OutputLoader:
             "count": len(rows),
             "filters": matrix.get("filters", {}),
             "items": rows,
+        }
+
+    def get_research_lists(self) -> dict[str, Any]:
+        as_of_date = self.latest_list_date()
+        if not as_of_date:
+            return {
+                "ok": False,
+                "message": "No multi-list output found. Please run generate_research_views.py first.",
+                "date": None,
+                "lists": [],
+                "disclaimer": API_DISCLAIMER,
+            }
+        path = self.lists_dir / f"multi_lists_{as_of_date}.json"
+        payload = self._read_json(path, fallback={})
+        raw_lists = payload.get("lists", []) if isinstance(payload, dict) else []
+        lists = []
+        for item in raw_lists if isinstance(raw_lists, list) else []:
+            if not isinstance(item, dict):
+                continue
+            rows = item.get("items", [])
+            rows = rows if isinstance(rows, list) else []
+            lists.append(
+                {
+                    "list_id": item.get("list_id", ""),
+                    "list_name": item.get("list_name", ""),
+                    "description": item.get("description", ""),
+                    "sort_logic": item.get("sort_logic", ""),
+                    "eligible_filters": item.get("eligible_filters", []),
+                    "top_n": item.get("top_n", 0),
+                    "item_count": len(rows),
+                    "items_preview": rows[:5],
+                }
+            )
+        return {
+            "ok": bool(lists),
+            "message": "" if lists else "No multi-list output found. Please run generate_research_views.py first.",
+            "date": as_of_date,
+            "lists": self._sanitize_payload(lists),
+            "disclaimer": API_DISCLAIMER,
+        }
+
+    def get_research_list(self, list_id: str) -> dict[str, Any]:
+        normalized_id = list_id.strip()
+        if normalized_id not in SUPPORTED_RESEARCH_LIST_IDS:
+            return {
+                "ok": False,
+                "message": f"Unknown list_id: {normalized_id}.",
+                "available_list_ids": sorted(SUPPORTED_RESEARCH_LIST_IDS),
+                "date": self.latest_list_date(),
+                "disclaimer": API_DISCLAIMER,
+            }
+        as_of_date = self.latest_list_date()
+        if not as_of_date:
+            return {
+                "ok": False,
+                "message": "No multi-list output found. Please run generate_research_views.py first.",
+                "available_list_ids": sorted(SUPPORTED_RESEARCH_LIST_IDS),
+                "date": None,
+                "disclaimer": API_DISCLAIMER,
+            }
+        path = self.lists_dir / f"{normalized_id}_{as_of_date}.json"
+        payload = self._read_json(path, fallback={})
+        if not isinstance(payload, dict):
+            return {
+                "ok": False,
+                "message": f"Research list output not found for {normalized_id}.",
+                "available_list_ids": sorted(SUPPORTED_RESEARCH_LIST_IDS),
+                "date": as_of_date,
+                "disclaimer": API_DISCLAIMER,
+            }
+        items = payload.get("items", [])
+        items = items if isinstance(items, list) else []
+        return {
+            "ok": True,
+            "message": "",
+            "date": payload.get("as_of_date") or as_of_date,
+            "list_id": payload.get("list_id", normalized_id),
+            "list_name": payload.get("list_name", ""),
+            "description": payload.get("description", ""),
+            "sort_logic": payload.get("sort_logic", ""),
+            "eligible_filters": payload.get("eligible_filters", []),
+            "top_n": payload.get("top_n", 0),
+            "item_count": len(items),
+            "items": self._sanitize_payload(items),
+            "disclaimer": API_DISCLAIMER,
+        }
+
+    def get_labels(
+        self,
+        *,
+        primary_type: str | None = None,
+        research_action: str | None = None,
+        risk_level: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        as_of_date = self.latest_label_date()
+        rows = self._load_label_rows(as_of_date)
+        filtered = rows
+        if primary_type:
+            filtered = [row for row in filtered if str(row.get("primary_type", "")) == primary_type]
+        if research_action:
+            filtered = [row for row in filtered if str(row.get("research_action", "")) == research_action]
+        if risk_level:
+            filtered = [row for row in filtered if str(row.get("risk_level", "")) == risk_level]
+        if limit is not None:
+            filtered = filtered[:limit]
+        return {
+            "ok": bool(as_of_date),
+            "message": "" if rows else ("No label output found. Please run generate_research_views.py first." if as_of_date else NO_DAILY_OUTPUT_MESSAGE),
+            "date": as_of_date,
+            "item_count": len(filtered),
+            "total_count": len(rows),
+            "filters": {
+                "primary_type": primary_type or "",
+                "research_action": research_action or "",
+                "risk_level": risk_level or "",
+                "limit": limit,
+            },
+            "items": self._sanitize_payload(filtered),
+            "label_counts": dict(Counter(str(row.get("research_label", "")) for row in filtered)),
+            "primary_type_counts": dict(Counter(str(row.get("primary_type", "")) for row in filtered)),
+            "risk_level_counts": dict(Counter(str(row.get("risk_level", "")) for row in filtered)),
+            "research_action_counts": dict(Counter(str(row.get("research_action", "")) for row in filtered)),
+            "disclaimer": API_DISCLAIMER,
+        }
+
+    def search_stocks(self, query: str) -> dict[str, Any]:
+        query_text = query.strip()
+        if not query_text:
+            return {"ok": False, "message": "Query parameter q is required.", "query": query, "count": 0, "items": [], "disclaimer": API_DISCLAIMER}
+        rows = self._load_label_rows(self.latest_label_date())
+        matches = [row for row in rows if self._symbol_or_name_matches(row, query_text)]
+        return {
+            "ok": True,
+            "message": "",
+            "query": query_text,
+            "count": len(matches),
+            "items": [self._search_result_item(row) for row in matches],
+            "disclaimer": API_DISCLAIMER,
+        }
+
+    def get_stock_research(self, symbol: str) -> dict[str, Any]:
+        requested = symbol.strip()
+        label_date = self.latest_label_date()
+        if not label_date:
+            return {
+                "ok": False,
+                "message": NO_DAILY_OUTPUT_MESSAGE,
+                "date": None,
+                "symbol": self._normalize_symbol_with_prefix(requested),
+                "data_quality": "missing_outputs",
+                "failed_symbol": None,
+                "disclaimer": API_DISCLAIMER,
+            }
+        rows = self._load_label_rows(label_date)
+        label_row = next((row for row in rows if self._symbol_matches(str(row.get("symbol", "")), requested)), None)
+        normalized = str(label_row.get("symbol")) if label_row else self._normalize_symbol_with_prefix(requested)
+        failed = self._failed_symbol_detail(requested)
+        if not label_row:
+            return {
+                "ok": False,
+                "message": "Symbol not found in current fixed historical candidate label set.",
+                "date": label_date,
+                "symbol": normalized,
+                "data_quality": "failed_symbol" if failed else "not_in_candidate_labels",
+                "failed_symbol": failed,
+                "disclaimer": API_DISCLAIMER,
+            }
+
+        candidate = self._candidate_row_for_symbol(normalized)
+        factors = self._factor_row_for_symbol(normalized)
+        related_lists = self._related_lists_for_symbol(normalized)
+        report = self._report_link(self.stock_report_file(normalized)) or {}
+        score_breakdown = {
+            "momentum_score": label_row.get("momentum_score", candidate.get("momentum_score")),
+            "trend_score": label_row.get("trend_score", candidate.get("trend_score")),
+            "relative_strength_score": label_row.get("relative_strength_score", candidate.get("relative_strength_score")),
+            "risk_score": label_row.get("risk_score", candidate.get("risk_score")),
+            "liquidity_score": label_row.get("liquidity_score", candidate.get("liquidity_score")),
+        }
+        return {
+            "ok": True,
+            "message": "",
+            "date": label_row.get("as_of_date") or self.latest_label_date(),
+            "symbol": normalized,
+            "name": label_row.get("name", ""),
+            "basic_info": {
+                "symbol": normalized,
+                "name": label_row.get("name", ""),
+                "as_of_date": label_row.get("as_of_date", ""),
+                "source_label": label_row.get("source_label", candidate.get("label", "")),
+            },
+            "current_rank": label_row.get("rank"),
+            "total_score": label_row.get("total_score"),
+            "score_breakdown": score_breakdown,
+            "primary_type": label_row.get("primary_type", ""),
+            "secondary_tags": label_row.get("secondary_tags", []),
+            "research_action": label_row.get("research_action", ""),
+            "confidence_level": label_row.get("confidence_level", ""),
+            "risk_level": label_row.get("risk_level", ""),
+            "confirmation_signals": label_row.get("confirmation_signals", []),
+            "invalidation_signals": label_row.get("invalidation_signals", []),
+            "label_reason": label_row.get("label_reason", ""),
+            "factor_explanation": self.get_factor_summary_by_symbol(normalized),
+            "evidence": {
+                "positive": label_row.get("positive_evidence", candidate.get("positive_evidence", "")),
+                "negative": label_row.get("negative_evidence", candidate.get("negative_evidence", "")),
+            },
+            "risk_flags": label_row.get("risk_flags", candidate.get("risk_flags", "")),
+            "warnings": label_row.get("warnings", candidate.get("warnings", "")),
+            "factor_row": self._sanitize_payload(factors),
+            "report_links": report,
+            "related_lists": related_lists,
+            "data_quality": label_row.get("data_quality", ""),
+            "disclaimer": API_DISCLAIMER,
         }
 
     def load_summary(self) -> dict[str, Any]:
@@ -800,6 +1042,118 @@ class OutputLoader:
             "markdown_path": str(report.markdown_path) if report.markdown_path and report.markdown_path.exists() else None,
             "html_path": str(report.html_path) if report.html_path and report.html_path.exists() else None,
         }
+
+    def _label_file(self, as_of_date: str | None) -> Path | None:
+        if not as_of_date:
+            return None
+        return self.labels_dir / f"candidate_labels_{as_of_date}.json"
+
+    def _load_label_rows(self, as_of_date: str | None) -> list[dict[str, Any]]:
+        path = self._label_file(as_of_date)
+        if not path or not path.exists():
+            return []
+        payload = self._read_json(path, fallback=[])
+        rows = payload.get("items", payload) if isinstance(payload, dict) else payload
+        if not isinstance(rows, list):
+            return []
+        return [row for row in self._sanitize_payload(rows) if isinstance(row, dict)]
+
+    def _candidate_row_for_symbol(self, symbol: str) -> dict[str, Any]:
+        candidates = self.load_candidates()
+        for row in candidates.get("items", []):
+            if self._symbol_matches(str(row.get("symbol", "")), symbol):
+                return row
+        return {}
+
+    def _factor_row_for_symbol(self, symbol: str) -> dict[str, Any]:
+        as_of_date = self.latest_daily_date()
+        if not as_of_date:
+            return {}
+        path = self._daily_files(as_of_date).get("factors")
+        payload = self._read_json(path, fallback=[]) if path else []
+        rows = payload.get("factors", payload) if isinstance(payload, dict) else payload
+        if not isinstance(rows, list):
+            return {}
+        for row in rows:
+            if isinstance(row, dict) and self._symbol_matches(str(row.get("symbol", "")), symbol):
+                return row
+        return {}
+
+    def _related_lists_for_symbol(self, symbol: str) -> list[dict[str, Any]]:
+        as_of_date = self.latest_list_date()
+        if not as_of_date or not self.lists_dir.exists():
+            return []
+        related: list[dict[str, Any]] = []
+        for list_id in sorted(SUPPORTED_RESEARCH_LIST_IDS):
+            payload = self._read_json(self.lists_dir / f"{list_id}_{as_of_date}.json", fallback={})
+            if not isinstance(payload, dict):
+                continue
+            items = payload.get("items", [])
+            if not isinstance(items, list):
+                continue
+            for index, item in enumerate(items, start=1):
+                if isinstance(item, dict) and self._symbol_matches(str(item.get("symbol", "")), symbol):
+                    related.append(
+                        {
+                            "list_id": list_id,
+                            "list_name": payload.get("list_name", ""),
+                            "position": index,
+                            "item_count": len(items),
+                        }
+                    )
+                    break
+        return related
+
+    def _failed_symbol_detail(self, symbol: str) -> dict[str, Any] | None:
+        for row in self.get_failed_symbols().get("items", []):
+            if isinstance(row, dict) and self._symbol_matches(str(row.get("symbol", "")), symbol):
+                return row
+        return None
+
+    def _search_result_item(self, row: dict[str, Any]) -> dict[str, Any]:
+        symbol = str(row.get("symbol", ""))
+        return {
+            "symbol": symbol,
+            "name": row.get("name", ""),
+            "rank": row.get("rank", 0),
+            "total_score": row.get("total_score", 0),
+            "primary_type": row.get("primary_type", ""),
+            "secondary_tags": row.get("secondary_tags", []),
+            "research_action": row.get("research_action", ""),
+            "confidence_level": row.get("confidence_level", ""),
+            "risk_level": row.get("risk_level", ""),
+            "report_links": self._report_link(self.stock_report_file(symbol)) or {},
+        }
+
+    def _symbol_or_name_matches(self, row: dict[str, Any], query: str) -> bool:
+        symbol = str(row.get("symbol", ""))
+        name = str(row.get("name", ""))
+        return self._symbol_matches(symbol, query) or query.lower() in name.lower()
+
+    def _symbol_matches(self, symbol: str, query: str) -> bool:
+        normalized_symbol = self._normalize_symbol(symbol)
+        normalized_query = self._normalize_symbol(query)
+        if normalized_symbol == normalized_query:
+            return True
+        return self._symbol_code(normalized_symbol) == self._symbol_code(normalized_query)
+
+    def _symbol_code(self, symbol: str) -> str:
+        text = self._normalize_symbol(symbol)
+        if "." in text:
+            return text.split(".")[-1]
+        return text
+
+    def _normalize_symbol_with_prefix(self, symbol: str) -> str:
+        text = self._normalize_symbol(symbol)
+        if "." in text or not re.fullmatch(r"\d{6}", text):
+            return text
+        if text.startswith("6"):
+            return f"sh.{text}"
+        if text.startswith(("0", "3")):
+            return f"sz.{text}"
+        if text.startswith(("4", "8")):
+            return f"bj.{text}"
+        return text
 
     def _daily_files(self, as_of_date: str | None) -> dict[str, Path]:
         if not as_of_date:

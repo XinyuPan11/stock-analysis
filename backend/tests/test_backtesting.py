@@ -167,6 +167,28 @@ class BacktestingTests(unittest.TestCase):
             self.assertIn("output_paths", summary_text)
             self.assertIn("backtest_equity_curve_2023-09-29.csv", summary_text)
 
+    def test_backtest_writes_progress_log_for_major_stages(self) -> None:
+        service = _service()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            progress_log = Path(temp_dir, "backtest_progress.log")
+            config = _config(top_n=2, limit=3)
+            config = replace(config, output_dir=temp_dir, progress_log_path=progress_log, progress_every=1)
+
+            run_walk_forward_backtest(service, config)
+
+            log_text = progress_log.read_text(encoding="utf-8")
+            self.assertIn("backtest start", log_text)
+            self.assertIn("benchmark loading start", log_text)
+            self.assertIn("rebalance dates count", log_text)
+            self.assertIn("rebalance progress index=", log_text)
+            self.assertIn("candidate universe end", log_text)
+            self.assertIn("portfolio construction start", log_text)
+            self.assertIn("equity curve calculation end", log_text)
+            self.assertIn("backtest summary generation end", log_text)
+            self.assertIn("backtest report generation end", log_text)
+            self.assertIn("backtest output writing end", log_text)
+            self.assertIn("backtest end status=ok", log_text)
+
 
 def _config(
     *,
