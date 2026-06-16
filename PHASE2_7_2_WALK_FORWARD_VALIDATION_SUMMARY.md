@@ -89,3 +89,17 @@ This is expected for the current fixed historical cache because it ends at the a
 ## Next Step
 
 Run controlled Phase 2.7.2 smoke validation on fixed historical outputs, then decide whether Phase 2.7.3 should add simulated portfolio validation for selected lists.
+
+## Controlled Real Validation Guide
+
+Added a run guide for preparing future-window cache data and running controlled 20D / 60D validation:
+
+- `PHASE2_7_2_REAL_VALIDATION_RUN_GUIDE.md`
+
+Key boundaries:
+
+- `2024-01-31` signals, rankings, labels, and lists remain fixed.
+- Future price data is used only for validation labels and list/factor evaluation.
+- 20D validation should prepare cache through at least `2024-03-15`.
+- 60D validation should prepare cache through preferably `2024-05-31`.
+- Validation remains dry-run/read-only by default.
