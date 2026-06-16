@@ -382,6 +382,54 @@ def guide(request: Request) -> dict[str, Any]:
     return get_loader(request).get_guide()
 
 
+@router.get("/api/lists")
+def research_lists(request: Request) -> dict[str, Any]:
+    return get_loader(request).get_research_lists()
+
+
+@router.get("/api/lists/{list_id}")
+def research_list_detail(request: Request, list_id: str) -> Any:
+    payload = get_loader(request).get_research_list(list_id)
+    if not payload.get("ok"):
+        return JSONResponse(payload, status_code=404)
+    return payload
+
+
+@router.get("/api/labels")
+def labels(
+    request: Request,
+    primary_type: str | None = None,
+    research_action: str | None = None,
+    risk_level: str | None = None,
+    limit: str | None = None,
+) -> Any:
+    parsed_limit, error = _parse_optional_int(limit, "limit")
+    if error:
+        return JSONResponse({"ok": False, "message": error, "items": []}, status_code=400)
+    return get_loader(request).get_labels(
+        primary_type=primary_type,
+        research_action=research_action,
+        risk_level=risk_level,
+        limit=parsed_limit,
+    )
+
+
+@router.get("/api/stocks/search")
+def stock_search(request: Request, q: str = "") -> Any:
+    payload = get_loader(request).search_stocks(q)
+    if not payload.get("ok"):
+        return JSONResponse(payload, status_code=400)
+    return payload
+
+
+@router.get("/api/stocks/{symbol}/research")
+def stock_research(request: Request, symbol: str) -> Any:
+    payload = get_loader(request).get_stock_research(symbol)
+    if not payload.get("ok"):
+        return JSONResponse(payload, status_code=404)
+    return payload
+
+
 @router.get("/api/summary", response_model=SummaryResponse)
 def summary(request: Request) -> dict[str, Any]:
     return get_loader(request).load_summary()

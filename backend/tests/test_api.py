@@ -543,6 +543,154 @@ class ApiTests(unittest.TestCase):
         self.assertIn("run_daily_workflow.py", response.text)
         self.assertIn("data\\cache\\daily-use", response.text)
 
+    def test_research_lists_api_returns_all_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/lists")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["date"], "2024-01-31")
+        self.assertEqual(len(payload["lists"]), 8)
+        self.assertIn("disclaimer", payload)
+        first = payload["lists"][0]
+        self.assertIn("item_count", first)
+        self.assertIn("items_preview", first)
+
+    def test_research_list_detail_returns_specific_list(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/lists/high_confidence_candidates")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["list_id"], "high_confidence_candidates")
+        self.assertGreaterEqual(payload["item_count"], 1)
+        self.assertEqual(payload["items"][0]["symbol"], "sh.600016")
+
+    def test_empty_research_list_does_not_500(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/lists/rebound_watch")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["item_count"], 0)
+        self.assertEqual(payload["items"], [])
+
+    def test_unknown_research_list_returns_404_with_available_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/lists/not_a_list")
+
+        self.assertEqual(response.status_code, 404)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertIn("available_list_ids", payload)
+        self.assertIn("trend_leaders", payload["available_list_ids"])
+
+    def test_labels_api_returns_counts_and_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/labels", params={"primary_type": "趋势龙头型", "limit": "2"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["item_count"], 2)
+        self.assertIn("primary_type_counts", payload)
+        self.assertEqual(payload["primary_type_counts"]["趋势龙头型"], 2)
+        self.assertIn("risk_level_counts", payload)
+        self.assertIn("research_action_counts", payload)
+
+    def test_stock_search_matches_numeric_sh_symbol(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/stocks/search", params={"q": "600000"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["symbol"], "sh.600000")
+
+    def test_stock_search_matches_numeric_sz_symbol(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/stocks/search", params={"q": "000001"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["symbol"], "sz.000001")
+
+    def test_stock_search_supports_chinese_substring(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/stocks/search", params={"q": "平安"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["name"], "平安银行")
+
+    def test_empty_stock_search_returns_400_not_500(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/stocks/search?q=")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["count"], 0)
+
+    def test_stock_research_api_returns_label_score_risk_and_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/stocks/600016/research")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["symbol"], "sh.600016")
+        self.assertEqual(payload["primary_type"], "趋势龙头型")
+        self.assertIn("score_breakdown", payload)
+        self.assertIn("risk_flags", payload)
+        self.assertIn("report_links", payload)
+        self.assertIn("/reports/stocks/sh.600016", payload["report_links"]["page_url"])
+        self.assertTrue(any(item["list_id"] == "high_confidence_candidates" for item in payload["related_lists"]))
+
+    def test_stock_research_missing_symbol_does_not_500(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/stocks/sh.999999/research")
+
+        self.assertEqual(response.status_code, 404)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertIn("not found", payload["message"].lower())
+
     def test_home_and_output_health_show_latest_workflow_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             _write_outputs(temp_dir)
@@ -640,6 +788,11 @@ class ApiTests(unittest.TestCase):
                 json.dumps(client.get("/api/failed-symbols").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/data-quality").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/guide").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/lists").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/lists/high_confidence_candidates").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/labels").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/stocks/search?q=600000").json(), ensure_ascii=False),
+                json.dumps(client.get("/api/stocks/sh.600016/research").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/summary").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/backtest").json(), ensure_ascii=False),
                 json.dumps(client.get("/api/reports").json(), ensure_ascii=False),
@@ -661,12 +814,16 @@ def _write_outputs(root: str) -> None:
     errors = outputs / "errors"
     cache = outputs / "cache"
     workflow = outputs / "workflow"
+    labels_dir = outputs / "labels"
+    lists_dir = outputs / "lists"
     daily.mkdir(parents=True)
     stock_reports.mkdir(parents=True)
     backtests.mkdir(parents=True)
     errors.mkdir(parents=True)
     cache.mkdir(parents=True)
     workflow.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    lists_dir.mkdir(parents=True)
 
     candidates = [
         {
@@ -795,6 +952,12 @@ def _write_outputs(root: str) -> None:
             "average_holdings": 5,
         },
     }
+    labels = [
+        _label_row("sh.600016", "姘戠敓閾惰", primary_type="趋势龙头型", rank=1, total_score=91.2),
+        _label_row("sh.600000", "浦发银行", primary_type="长期稳定型", rank=2, total_score=88.0, research_action="重点研究", risk_level="中低"),
+        _label_row("sz.000001", "平安银行", primary_type="趋势龙头型", rank=3, total_score=86.5, research_action="持续跟踪", risk_level="中"),
+    ]
+    lists = _research_lists(labels)
 
     (daily / "candidates_2024-01-31.json").write_text(json.dumps(candidates, ensure_ascii=False), encoding="utf-8")
     (daily / "summary_2024-01-31.json").write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
@@ -819,6 +982,98 @@ def _write_outputs(root: str) -> None:
     (cache / "cache_prewarm_summary_2024-01-31.json").write_text(json.dumps(cache_summary, ensure_ascii=False), encoding="utf-8")
     (workflow / "workflow_summary_2024-01-31.json").write_text(json.dumps(workflow_summary, ensure_ascii=False), encoding="utf-8")
     (workflow / "workflow_log_2024-01-31.txt").write_text("workflow started\nworkflow status: ok\n", encoding="utf-8")
+    (labels_dir / "candidate_labels_2024-01-31.json").write_text(json.dumps(labels, ensure_ascii=False), encoding="utf-8")
+    (labels_dir / "candidate_labels_2024-01-31.csv").write_text("symbol,name\nsh.600016,姘戠敓閾惰\n", encoding="utf-8")
+    (lists_dir / "multi_lists_2024-01-31.json").write_text(
+        json.dumps({"status": "ok", "as_of_date": "2024-01-31", "lists": lists}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    for item in lists:
+        (lists_dir / f"{item['list_id']}_2024-01-31.json").write_text(json.dumps(item, ensure_ascii=False), encoding="utf-8")
+
+
+def _label_row(
+    symbol: str,
+    name: str,
+    *,
+    primary_type: str,
+    rank: int,
+    total_score: float,
+    research_action: str = "重点研究",
+    risk_level: str = "低",
+) -> dict[str, object]:
+    return {
+        "symbol": symbol,
+        "name": name,
+        "as_of_date": "2024-01-31",
+        "rank": rank,
+        "total_score": total_score,
+        "primary_type": primary_type,
+        "secondary_tags": [primary_type, "行业字段待补充"],
+        "research_label": f"{primary_type}｜中高置信｜{risk_level}风险",
+        "research_action": research_action,
+        "confidence_level": "中高",
+        "risk_level": risk_level,
+        "confirmation_signals": ["趋势结构保持完整", "风险标记没有新增"],
+        "invalidation_signals": ["趋势结构转弱", "风险分继续下行"],
+        "label_reason": "基于 fixed historical outputs 的横截面相对排序生成。",
+        "data_quality": "ok",
+        "source_label": "楂樼疆淇″€欓€?",
+        "momentum_score": 23.0,
+        "trend_score": 20.0,
+        "relative_strength_score": 19.0,
+        "risk_score": 16.0,
+        "liquidity_score": 13.2,
+        "positive_evidence": "趋势结构较强",
+        "negative_evidence": "",
+        "risk_flags": "",
+        "warnings": "",
+        "report_path_md": "",
+        "report_path_html": "",
+    }
+
+
+def _research_lists(labels: list[dict[str, object]]) -> list[dict[str, object]]:
+    def item(symbol: str) -> dict[str, object]:
+        row = next(label for label in labels if label["symbol"] == symbol)
+        return {
+            "symbol": row["symbol"],
+            "name": row["name"],
+            "rank": row["rank"],
+            "total_score": row["total_score"],
+            "primary_type": row["primary_type"],
+            "secondary_tags": row["secondary_tags"],
+            "research_action": row["research_action"],
+            "confidence_level": row["confidence_level"],
+            "risk_level": row["risk_level"],
+            "label_reason": row["label_reason"],
+            "confirmation_signals": row["confirmation_signals"],
+            "invalidation_signals": row["invalidation_signals"],
+        }
+
+    definitions = {
+        "high_confidence_candidates": [item("sh.600016"), item("sh.600000")],
+        "trend_leaders": [item("sh.600016"), item("sz.000001")],
+        "long_term_stable": [item("sh.600000")],
+        "breakout_watch": [item("sh.600016")],
+        "accumulation_watch": [item("sz.000001")],
+        "rebound_watch": [],
+        "high_risk_active": [],
+        "insufficient_data": [],
+    }
+    return [
+        {
+            "list_id": list_id,
+            "list_name": list_id,
+            "description": f"{list_id} description",
+            "sort_logic": "unit sort",
+            "eligible_filters": ["unit filter"],
+            "as_of_date": "2024-01-31",
+            "top_n": 30,
+            "items": items,
+        }
+        for list_id, items in definitions.items()
+    ]
 
 
 if __name__ == "__main__":
