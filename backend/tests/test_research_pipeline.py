@@ -10,6 +10,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from stock_analysis.research import pipeline as pipeline_module
 from stock_analysis.research.pipeline import (
     CANDIDATE_OUTPUT_COLUMNS,
     ResearchPipelineConfig,
@@ -44,6 +45,46 @@ class FakeResearchService:
     def get_index_daily(self, index_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         self.index_calls.append(index_code)
         return self.benchmark.copy()
+
+
+class FakeTimeoutProvider:
+    source = "unit"
+
+
+class FakeTimeoutCache:
+    cache_dir = "unit-cache"
+
+    def __init__(self, missing_symbols: set[str]) -> None:
+        self.missing_symbols = missing_symbols
+
+    def market_data_path(self, *, provider: str, dataset: str, symbol: str, adjusted: bool) -> Path:
+        return Path("unit-cache", provider, dataset, "adjusted" if adjusted else "raw", f"{symbol}.csv")
+
+    def has_market_data_coverage(
+        self,
+        *,
+        provider: str,
+        dataset: str,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        adjusted: bool,
+    ) -> bool:
+        return symbol not in self.missing_symbols
+
+    def get_market_data(self, **kwargs) -> pd.DataFrame:
+        raise AssertionError("timeout test should not call cache.get_market_data")
+
+
+class FakeTimeoutEligibleService(FakeResearchService):
+    def __init__(self, missing_symbols: set[str]) -> None:
+        super().__init__(
+            pd.DataFrame([_stock("AAA", "Alpha"), _stock("SLOW", "Slow")]),
+            {"AAA": _prices("AAA", 1.5, amount=100_000_000, volume=10_000_000)},
+            _prices("CSI300", 1.0, amount=500_000_000, volume=50_000_000),
+        )
+        self.provider = FakeTimeoutProvider()
+        self.cache = FakeTimeoutCache(missing_symbols)
 
 
 class ResearchPipelineTests(unittest.TestCase):
@@ -184,6 +225,47 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertIn("output writing start", log_text)
         self.assertIn("output writing end", log_text)
 
+    def test_symbol_timeout_is_recorded_and_pipeline_continues(self) -> None:
+        service = FakeTimeoutEligibleService(missing_symbols={"SLOW"})
+        original = pipeline_module._fetch_stock_daily_with_provider_timeout
+
+        def fake_timeout_fetch(*, service, symbol, config, timeout_metadata):
+            return None, {
+                "symbol": symbol,
+                "stage": "provider_fetch",
+                "error_type": "symbol_timeout",
+                "error": "Symbol fetch timed out after 0.1s during provider_fetch.",
+                "attempts": "1",
+                "elapsed_seconds": "0.1",
+            }
+
+        pipeline_module._fetch_stock_daily_with_provider_timeout = fake_timeout_fetch
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                progress_log = Path(temp_dir, "daily_research_progress.log")
+                result = run_research_pipeline(
+                    service,
+                    _config(
+                        top_n=1,
+                        limit=2,
+                        output_dir=temp_dir,
+                        error_output_dir=temp_dir,
+                        progress_log_path=progress_log,
+                        progress_every=1,
+                        symbol_timeout_seconds=0.1,
+                    ),
+                )
+                log_text = progress_log.read_text(encoding="utf-8")
+        finally:
+            pipeline_module._fetch_stock_daily_with_provider_timeout = original
+
+        self.assertEqual(result.summary["fetch_error_count"], 1)
+        self.assertEqual(result.fetch_errors[0]["symbol"], "SLOW")
+        self.assertEqual(result.fetch_errors[0]["error_type"], "symbol_timeout")
+        self.assertEqual(result.fetch_errors[0]["stage"], "provider_fetch")
+        self.assertIn("AAA", set(result.candidates["symbol"]))
+        self.assertIn("SYMBOL_TIMEOUT", log_text)
+
 
 def _config(
     top_n: int = 2,
@@ -194,6 +276,7 @@ def _config(
     error_output_dir: str | None = None,
     progress_log_path: str | Path | None = None,
     progress_every: int = 100,
+    symbol_timeout_seconds: float | None = 60.0,
 ) -> ResearchPipelineConfig:
     return ResearchPipelineConfig(
         start_date="2023-01-01",
@@ -208,6 +291,7 @@ def _config(
         error_output_dir=error_output_dir,
         progress_log_path=progress_log_path,
         progress_every=progress_every,
+        symbol_timeout_seconds=symbol_timeout_seconds,
     )
 
 

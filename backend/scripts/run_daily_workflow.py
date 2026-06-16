@@ -31,6 +31,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--sleep-seconds", type=float, default=0.5)
     parser.add_argument("--retry", type=int, default=1)
+    parser.add_argument("--daily-progress-every", type=int, default=100)
+    parser.add_argument("--symbol-timeout-seconds", type=float, default=60.0)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--cache-dir", default="data/cache/daily-use")
     parser.add_argument("--output-dir", default="outputs")
@@ -66,6 +68,8 @@ def main() -> int:
         batch_size=args.batch_size,
         sleep_seconds=args.sleep_seconds,
         retry=args.retry,
+        daily_progress_every=args.daily_progress_every,
+        symbol_timeout_seconds=args.symbol_timeout_seconds,
         resume=args.resume,
         cache_dir=args.cache_dir,
         output_dir=args.output_dir,

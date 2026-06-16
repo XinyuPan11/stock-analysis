@@ -188,7 +188,7 @@ class DailyWorkflowTests(unittest.TestCase):
 
     def test_daily_research_command_includes_progress_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            config = _config(temp_dir, skip_prewarm=True, skip_backtest=True)
+            config = _config(temp_dir, skip_prewarm=True, skip_backtest=True, daily_progress_every=1, symbol_timeout_seconds=60.0)
             commands: list[list[str]] = []
 
             def runner(command: list[str], cwd: Path) -> CommandResult:
@@ -203,6 +203,11 @@ class DailyWorkflowTests(unittest.TestCase):
         progress_log_index = research_command.index("--progress-log")
         self.assertTrue(research_command[progress_log_index + 1].endswith("daily_research_progress_2024-01-31.log"))
         self.assertIn("--progress-every", research_command)
+        progress_every_index = research_command.index("--progress-every")
+        self.assertEqual(research_command[progress_every_index + 1], "1")
+        self.assertIn("--symbol-timeout-seconds", research_command)
+        timeout_index = research_command.index("--symbol-timeout-seconds")
+        self.assertEqual(research_command[timeout_index + 1], "60.0")
 
     def test_backtest_command_includes_progress_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -235,6 +240,24 @@ class DailyWorkflowTests(unittest.TestCase):
                 module = _load_script_module(script_name)
                 self.assertIsNone(module.parse_args(args).limit)
                 self.assertEqual(module.parse_args([*args, "--limit", "1500"]).limit, 1500)
+
+    def test_daily_workflow_parser_supports_daily_progress_and_symbol_timeout(self) -> None:
+        module = _load_script_module("run_daily_workflow.py")
+        args = module.parse_args(
+            [
+                "--start-date",
+                "2023-01-01",
+                "--end-date",
+                "2024-01-31",
+                "--daily-progress-every",
+                "1",
+                "--symbol-timeout-seconds",
+                "45",
+            ]
+        )
+
+        self.assertEqual(args.daily_progress_every, 1)
+        self.assertEqual(args.symbol_timeout_seconds, 45.0)
 
 
 def _config(root: str, **overrides: object) -> DailyWorkflowConfig:

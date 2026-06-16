@@ -39,6 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--error-output-dir", default=str(REPO_ROOT / "outputs" / "errors"))
     parser.add_argument("--progress-log", default=None)
     parser.add_argument("--progress-every", type=int, default=100)
+    parser.add_argument("--symbol-timeout-seconds", type=float, default=60.0)
     return parser.parse_args(argv)
 
 
@@ -64,6 +65,7 @@ def main() -> int:
             error_output_dir=args.error_output_dir,
             progress_log_path=args.progress_log,
             progress_every=args.progress_every,
+            symbol_timeout_seconds=args.symbol_timeout_seconds,
         ),
     )
 
@@ -83,6 +85,7 @@ def main() -> int:
         "error_output_dir": str(Path(args.error_output_dir).resolve()),
         "progress_log": str(Path(args.progress_log).resolve()) if args.progress_log else "",
         "progress_every": args.progress_every,
+        "symbol_timeout_seconds": args.symbol_timeout_seconds,
         "summary": result.summary,
         "fetch_errors": result.fetch_errors[:20],
         "candidates": _records(result.candidates),

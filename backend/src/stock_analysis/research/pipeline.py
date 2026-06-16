@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 import json
+import multiprocessing as mp
+import queue
 from pathlib import Path
 import time
 from typing import Protocol
@@ -64,6 +66,7 @@ class ResearchPipelineConfig:
     filter_config: FilterConfig | None = None
     progress_log_path: str | Path | None = None
     progress_every: int = 100
+    symbol_timeout_seconds: float | None = 60.0
 
 
 @dataclass(frozen=True)
@@ -117,15 +120,18 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
                 symbol=symbol,
                 **debug,
             )
-        frame, error = _fetch_stock_daily_with_retry(service, symbol, config)
+        frame, error = _fetch_stock_daily_for_symbol(service, symbol, config, debug)
         elapsed = time.perf_counter() - symbol_timer
         row_count = 0 if frame is None else len(frame)
         if error:
+            error.setdefault("index", str(index))
+            error.setdefault("total", str(len(symbols)))
+            error.setdefault("elapsed_seconds", str(round(elapsed, 4)))
             fetch_errors.append(error)
         elif frame is not None:
             daily_frames.append(frame)
         if debug_enabled or error or elapsed > 10.0:
-            event = "SLOW_SYMBOL" if elapsed > 10.0 else "stock daily end"
+            event = "SYMBOL_TIMEOUT" if error and error.get("error_type") == "symbol_timeout" else "SLOW_SYMBOL" if elapsed > 10.0 else "stock daily end"
             coverage_ok = debug.get("coverage_ok", "unknown")
             fetch_attempted: object = not coverage_ok if isinstance(coverage_ok, bool) else "unknown"
             progress(
@@ -135,6 +141,7 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
                 symbol=symbol,
                 elapsed_seconds=round(elapsed, 4),
                 loaded_rows=row_count,
+                stage=error.get("stage", "") if error else "",
                 cache_hit=debug.get("cache_hit", "unknown"),
                 coverage_ok=coverage_ok,
                 fetch_attempted=fetch_attempted,
@@ -240,6 +247,25 @@ def _fetch_benchmark(
         return pd.DataFrame()
 
 
+def _fetch_stock_daily_for_symbol(
+    service: MarketDataServiceLike,
+    symbol: str,
+    config: ResearchPipelineConfig,
+    debug: dict[str, object],
+) -> tuple[pd.DataFrame | None, dict[str, str] | None]:
+    coverage_ok = debug.get("coverage_ok")
+    needs_provider_fetch = isinstance(coverage_ok, bool) and not coverage_ok
+    timeout_metadata = _service_timeout_metadata(service)
+    if config.symbol_timeout_seconds and needs_provider_fetch and timeout_metadata:
+        return _fetch_stock_daily_with_provider_timeout(
+            service=service,
+            symbol=symbol,
+            config=config,
+            timeout_metadata=timeout_metadata,
+        )
+    return _fetch_stock_daily_with_retry(service, symbol, config)
+
+
 def _fetch_stock_daily_with_retry(
     service: MarketDataServiceLike,
     symbol: str,
@@ -260,6 +286,155 @@ def _fetch_stock_daily_with_retry(
         "error": error_text,
         "attempts": str(attempts),
     }
+
+
+def _fetch_stock_daily_with_provider_timeout(
+    *,
+    service: MarketDataServiceLike,
+    symbol: str,
+    config: ResearchPipelineConfig,
+    timeout_metadata: dict[str, str],
+) -> tuple[pd.DataFrame | None, dict[str, str] | None]:
+    timeout_seconds = float(config.symbol_timeout_seconds or 0)
+    attempts = max(1, int(config.retry) + 1)
+    started = time.perf_counter()
+    context = mp.get_context("spawn")
+    result_queue = context.Queue(maxsize=1)
+    process = context.Process(
+        target=_provider_fetch_worker,
+        args=(
+            result_queue,
+            timeout_metadata["provider"],
+            symbol,
+            config.start_date,
+            config.end_date,
+            config.adjusted,
+            attempts,
+        ),
+    )
+    process.daemon = True
+    process.start()
+    process.join(timeout_seconds)
+    elapsed = time.perf_counter() - started
+
+    if process.is_alive():
+        process.terminate()
+        process.join(timeout=5)
+        return None, {
+            "symbol": symbol,
+            "stage": "provider_fetch",
+            "error_type": "symbol_timeout",
+            "error": f"Symbol fetch timed out after {timeout_seconds:.1f}s during provider_fetch.",
+            "attempts": str(attempts),
+            "elapsed_seconds": str(round(elapsed, 4)),
+        }
+
+    try:
+        payload = result_queue.get_nowait()
+    except queue.Empty:
+        return None, {
+            "symbol": symbol,
+            "stage": "provider_fetch",
+            "error_type": "provider_error",
+            "error": f"Symbol fetch worker exited without a result. exitcode={process.exitcode}",
+            "attempts": str(attempts),
+            "elapsed_seconds": str(round(elapsed, 4)),
+        }
+
+    if payload.get("status") != "ok":
+        error_text = str(payload.get("error", "unknown provider error"))
+        return None, {
+            "symbol": symbol,
+            "stage": "provider_fetch",
+            "error_type": _classify_error(error_text),
+            "error": error_text,
+            "attempts": str(payload.get("attempts", attempts)),
+            "elapsed_seconds": str(round(elapsed, 4)),
+        }
+
+    fetched = pd.DataFrame(payload.get("records", []))
+    if fetched.empty:
+        return None, {
+            "symbol": symbol,
+            "stage": "provider_fetch",
+            "error_type": "empty_market_data",
+            "error": f"{config.provider} failed during stock daily {symbol} {config.start_date}..{config.end_date}: empty_market_data: provider returned no daily rows.",
+            "attempts": str(attempts),
+            "elapsed_seconds": str(round(elapsed, 4)),
+        }
+
+    cache = getattr(service, "cache")
+    provider = timeout_metadata["provider"]
+
+    def cached_fetcher(fetch_start: str, fetch_end: str) -> pd.DataFrame:
+        return fetched[(fetched["trade_date"] >= fetch_start) & (fetched["trade_date"] <= fetch_end)].copy()
+
+    try:
+        frame = cache.get_market_data(
+            provider=provider,
+            dataset="stock_daily",
+            symbol=symbol,
+            start_date=config.start_date,
+            end_date=config.end_date,
+            adjusted=config.adjusted,
+            fetcher=cached_fetcher,
+        )
+    except Exception as exc:
+        error_text = str(exc)
+        return None, {
+            "symbol": symbol,
+            "stage": "cache_loading",
+            "error_type": _classify_error(error_text),
+            "error": error_text,
+            "attempts": str(attempts),
+            "elapsed_seconds": str(round(time.perf_counter() - started, 4)),
+        }
+    return frame, None
+
+
+def _provider_fetch_worker(
+    result_queue,
+    provider_name: str,
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    adjusted: bool,
+    attempts: int,
+) -> None:
+    try:
+        provider = _build_provider_for_timeout(provider_name)
+        last_error: Exception | None = None
+        for _ in range(attempts):
+            try:
+                frame = provider.get_stock_daily(symbol=symbol, start_date=start_date, end_date=end_date, adjusted=adjusted)
+                result_queue.put({"status": "ok", "records": frame.to_dict(orient="records"), "attempts": attempts})
+                return
+            except Exception as exc:
+                last_error = exc
+        result_queue.put({"status": "error", "error": str(last_error) if last_error else "unknown error", "attempts": attempts})
+    except Exception as exc:
+        result_queue.put({"status": "error", "error": str(exc), "attempts": attempts})
+
+
+def _build_provider_for_timeout(provider_name: str):
+    from stock_analysis.data.providers import AkShareProvider, BaoStockProvider, TushareProvider
+
+    if provider_name == "akshare":
+        return AkShareProvider()
+    if provider_name == "baostock":
+        return BaoStockProvider()
+    if provider_name == "tushare":
+        return TushareProvider()
+    raise ValueError(f"Unsupported provider for symbol timeout: {provider_name}")
+
+
+def _service_timeout_metadata(service: MarketDataServiceLike) -> dict[str, str] | None:
+    provider = getattr(getattr(service, "provider", None), "source", "")
+    cache = getattr(service, "cache", None)
+    cache_dir = getattr(cache, "cache_dir", None)
+    if not provider or cache_dir is None or not hasattr(cache, "get_market_data"):
+        return None
+    return {"provider": str(provider), "cache_dir": str(cache_dir)}
 
 
 def _calculate_factors_for_passed(
@@ -364,14 +539,18 @@ def _error_output_row(error: dict[str, str], config: ResearchPipelineConfig) -> 
     return {
         "symbol": error.get("symbol", ""),
         "name": error.get("name", ""),
+        "stage": error.get("stage", ""),
+        "index": error.get("index", ""),
+        "total": error.get("total", ""),
         "error_type": error_type,
         "error_message": error.get("error", ""),
+        "elapsed_seconds": error.get("elapsed_seconds", ""),
         "provider": config.provider,
         "start_date": pd.Timestamp(config.start_date).strftime("%Y-%m-%d"),
         "end_date": pd.Timestamp(config.end_date).strftime("%Y-%m-%d"),
         "attempt_count": error.get("attempts", "1"),
         "last_attempt_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "can_retry": error_type in {"connection", "timeout", "empty_market_data", "non_numeric_market_data", "provider_error"},
+        "can_retry": error_type in {"connection", "timeout", "symbol_timeout", "empty_market_data", "non_numeric_market_data", "provider_error"},
     }
 
 
@@ -534,6 +713,8 @@ def _validate_config(config: ResearchPipelineConfig) -> None:
         raise ValueError("retry cannot be negative.")
     if config.progress_every <= 0:
         raise ValueError("progress_every must be positive.")
+    if config.symbol_timeout_seconds is not None and config.symbol_timeout_seconds <= 0:
+        raise ValueError("symbol_timeout_seconds must be positive when set.")
     start = pd.to_datetime(config.start_date, errors="coerce")
     end = pd.to_datetime(config.end_date, errors="coerce")
     if pd.isna(start) or pd.isna(end):

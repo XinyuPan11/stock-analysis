@@ -74,6 +74,57 @@ Backtest is the dominant remaining runtime bottleneck in the full fixed historic
 workflow. It completed successfully, but it writes outputs only at the end of the step,
 so it has weaker mid-step observability than daily research.
 
+## Full Workflow With Daily Symbol Timeout
+
+Validation run started on `2026-06-15` after adding per-symbol daily research fetch
+timeouts.
+
+Command used:
+
+```powershell
+python backend\scripts\run_daily_workflow.py --provider baostock --start-date 2023-01-01 --end-date 2024-01-31 --top-n 150 --backtest-top-n 10 --benchmark CSI300 --cache-dir data\cache\daily-use --output-dir outputs --include-lookback-days 120 --lookback-days 120 --batch-size 20 --sleep-seconds 0.5 --retry 1 --resume --skip-prewarm --daily-progress-every 1 --symbol-timeout-seconds 60
+```
+
+Result:
+
+- Workflow status: `failed`
+- Total elapsed seconds: `28748.1372`
+- `daily_research`: `ok`
+- `report_generation`: `ok`
+- `backtest`: `failed`
+- `output_health`: `ok`
+- Full market: `true`
+- Limit: `null`
+
+Daily research result:
+
+- Elapsed seconds: `5800.5741`
+- Candidate count: `150`
+- Factor rows: `4810`
+- Fetch error count: `190`
+- Per-symbol timeout behavior: confirmed
+- Timeout examples: `sz.301538`, `sz.301557`, `sz.301560`, `sz.301590`, `sz.301599`, `sz.301600`, `sz.301601`
+
+The daily research stall root cause is no longer a single permanent stuck symbol. It is
+a set of post-period or BaoStock-uncovered symbols whose provider calls can be slow or
+occasionally fail to return promptly. The new timeout records those as `symbol_timeout`
+and continues processing.
+
+Backtest result:
+
+- Backtest elapsed seconds before failure: `22943.7886`
+- Last progress checkpoint: `processed=2700 total=5494 loaded_frames=2614 fetch_errors=86 last_symbol=sz.000958`
+- Backtest outputs were not refreshed by this run; existing backtest output files remain
+  from the earlier successful `2026-06-14` validation.
+- Observed failure signal: repeated BaoStock socket errors, including `WinError 10057`.
+
+Conclusion: the daily research timeout hardening is effective, but Phase 2.6 cannot be
+fully closed on this run because the backtest stock-history loading path can still spend
+hours in BaoStock/cache recovery and fail before rebalance construction. The next
+minimal Phase 2.6 step should apply equivalent timeout or cache-only safeguards to
+backtest history loading, without changing backtest scoring, portfolio construction, or
+result semantics.
+
 ## Daily Research Result
 
 - Universe count: `5494`
@@ -130,6 +181,9 @@ Backtest outputs:
   prepared.
 - Backtest is now the longest completed stage. Backtest progress diagnostics were added
   after this validation run so future runs can show mid-step progress.
+- Daily research now has per-symbol provider fetch timeout protection, but backtest
+  history loading still needs equivalent protection after the `2026-06-15` run failed
+  at `processed=2700`.
 - `fetch_error_count` remains `190` for the fixed historical full-market run.
 - Backtest warnings include monthly `listing_date_missing` entries.
 - Recursive listing of all `outputs` can be slow because the report directory contains

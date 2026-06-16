@@ -93,8 +93,10 @@ def research_step(config: DailyWorkflowConfig) -> WorkflowStep:
         "--progress-log",
         str(config.workflow_output_dir / f"daily_research_progress_{config.end_date}.log"),
         "--progress-every",
-        "100",
+        str(config.daily_progress_every),
     ]
+    if config.symbol_timeout_seconds is not None:
+        command.extend(["--symbol-timeout-seconds", str(config.symbol_timeout_seconds)])
     _append_limit(command, config.limit)
     return WorkflowStep(
         name="daily_research",
