@@ -56,6 +56,8 @@ def run_portfolio_validation(config: PortfolioValidationConfig) -> dict[str, obj
         cache_dir=Path(config.cache_dir),
         benchmark=config.benchmark,
     )
+    benchmark_data_quality = str(future_labels.attrs.get("benchmark_data_quality", "benchmark_missing"))
+    benchmark_symbol = str(future_labels.attrs.get("benchmark_symbol", config.benchmark))
     performance = evaluate_portfolios(
         holdings_by_portfolio,
         future_labels,
@@ -71,6 +73,8 @@ def run_portfolio_validation(config: PortfolioValidationConfig) -> dict[str, obj
         "as_of_date": config.as_of_date,
         "horizon_days": config.horizon_days,
         "benchmark": config.benchmark,
+        "benchmark_symbol": benchmark_symbol,
+        "benchmark_data_quality": benchmark_data_quality,
         "dry_run": config.dry_run,
         "no_future_leakage": True,
         "research_only": True,
@@ -169,7 +173,7 @@ def load_future_labels_for_symbols(
     missing = _symbols_needing_cache_refresh(required_symbols, predictions)
     computed = pd.DataFrame()
     if missing:
-        benchmark_history = _load_benchmark_history_for_horizon(
+        benchmark_history, benchmark_symbol, benchmark_quality = _load_benchmark_history_for_horizon(
             cache_dir,
             benchmark=benchmark,
             as_of_date=as_of_date,
@@ -192,7 +196,17 @@ def load_future_labels_for_symbols(
                 | (computed.get("data_quality", "") == "ok")
             ].copy()
     combined = pd.concat([predictions, computed], ignore_index=True) if not computed.empty else predictions
-    return _filter_and_order_labels(combined, required_symbols)
+    result = _filter_and_order_labels(combined, required_symbols)
+    if "benchmark_quality" not in locals():
+        benchmark_history, benchmark_symbol, benchmark_quality = _load_benchmark_history_for_horizon(
+            cache_dir,
+            benchmark=benchmark,
+            as_of_date=as_of_date,
+            horizon_days=horizon_days,
+        )
+    result.attrs["benchmark_symbol"] = benchmark_symbol
+    result.attrs["benchmark_data_quality"] = benchmark_quality if benchmark_quality != "ok" else _benchmark_quality_from_labels(result, fallback=benchmark_quality)
+    return result
 
 
 def write_portfolio_outputs(config: PortfolioValidationConfig, result: dict[str, object]) -> dict[str, str]:
@@ -235,6 +249,7 @@ def markdown_portfolio_report(result: dict[str, object]) -> str:
         f"- Status: {summary.get('status')}",
         f"- As-of date: {summary.get('as_of_date')}",
         f"- Horizon days: {summary.get('horizon_days')}",
+        f"- Benchmark data quality: {summary.get('benchmark_data_quality')}",
         f"- Portfolio count: {summary.get('portfolio_count')}",
         f"- Transaction cost bps: {summary.get('transaction_cost_bps')}",
         f"- Required symbols: {summary.get('required_symbol_count')}",
@@ -360,14 +375,17 @@ def _symbols_needing_cache_refresh(required_symbols: list[str], labels: pd.DataF
     return symbols
 
 
-def _load_benchmark_history_for_horizon(cache_dir: Path, *, benchmark: str, as_of_date: str, horizon_days: int) -> pd.DataFrame:
+def _load_benchmark_history_for_horizon(cache_dir: Path, *, benchmark: str, as_of_date: str, horizon_days: int) -> tuple[pd.DataFrame, str, str]:
     fallback = pd.DataFrame()
+    fallback_symbol = benchmark_aliases(benchmark)[0]
+    fallback_quality = "benchmark_missing"
     for alias in benchmark_aliases(benchmark):
         frame = load_cached_price_history(cache_dir, provider="baostock", symbol=alias, dataset="index_daily", adjusted=False)
         if frame.empty:
             continue
         if fallback.empty:
             fallback = frame
+            fallback_symbol = alias
         label = calculate_future_return_label(
             alias,
             frame,
@@ -376,13 +394,24 @@ def _load_benchmark_history_for_horizon(cache_dir: Path, *, benchmark: str, as_o
             benchmark_history=None,
         )
         if label.get("data_quality") == "ok":
-            return frame
-    return fallback
+            return frame, alias, "ok"
+        fallback_quality = f"benchmark_{label.get('data_quality', 'missing_price')}"
+    return fallback, fallback_symbol, fallback_quality
+
+
+def _benchmark_quality_from_labels(labels: pd.DataFrame, *, fallback: str) -> str:
+    if labels.empty or "benchmark_data_quality" not in labels.columns:
+        return fallback
+    qualities = [str(item) for item in labels["benchmark_data_quality"].dropna().tolist() if str(item)]
+    if any(item == "ok" for item in qualities):
+        return "ok"
+    return qualities[0] if qualities else fallback
 
 
 def _cache_plan_text(result: dict[str, object]) -> str:
     summary = result.get("summary", {})
     missing = summary.get("missing_future_label_symbols") or []
+    benchmark_quality = str(summary.get("benchmark_data_quality") or "benchmark_missing")
     non_ok: list[str] = []
     for row in result.get("portfolio_performance", []):
         if isinstance(row, dict):
@@ -396,6 +425,8 @@ def _cache_plan_text(result: dict[str, object]) -> str:
         "",
         f"As-of date: {summary.get('as_of_date')}",
         f"Horizon days: {summary.get('horizon_days')}",
+        f"Benchmark: {summary.get('benchmark')}",
+        f"Benchmark data quality: {benchmark_quality}",
         f"Required symbols: {summary.get('required_symbol_count')}",
         f"Missing future labels: {len(missing)}",
         f"Non-ok future labels: {len(non_ok)}",
@@ -408,6 +439,15 @@ def _cache_plan_text(result: dict[str, object]) -> str:
     if non_ok:
         lines.extend(["## Non-ok future labels", ""])
         lines.extend(non_ok)
+        lines.append("")
+    if benchmark_quality != "ok":
+        lines.extend(
+            [
+                "## Benchmark future window",
+                "",
+                f"Benchmark data quality is {benchmark_quality}. Prepare/refresh the benchmark future-window cache before interpreting excess-return metrics.",
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 

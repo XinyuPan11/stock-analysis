@@ -134,6 +134,82 @@ class PortfolioSimulatorTests(unittest.TestCase):
             self.assertAlmostEqual(portfolio["outperform_rate"], 1.0)
             self.assertAlmostEqual(portfolio["best_cases"][0]["benchmark_return"], 0.01)
             self.assertEqual(portfolio["best_cases"][0]["outperformed_benchmark"], True)
+            self.assertEqual(result["summary"]["benchmark_symbol"], "sh.000300")
+            self.assertEqual(result["summary"]["benchmark_data_quality"], "ok")
+
+    def test_cache_recomputes_excess_return_from_csi300_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            outputs = root / "outputs"
+            (outputs / "lists").mkdir(parents=True)
+            (outputs / "validation").mkdir(parents=True)
+            _write_json(
+                outputs / "lists" / "high_confidence_candidates_2024-01-31.json",
+                {"list_id": "high_confidence_candidates", "as_of_date": "2024-01-31", "items": [_item("AAA01", 1)]},
+            )
+            pd.DataFrame(
+                [{"symbol": "AAA01", "future_return": 0.1, "future_excess_return": None, "benchmark_return": None, "outperformed_benchmark": None, "data_quality": "ok"}]
+            ).to_csv(outputs / "validation" / "walk_forward_predictions_2024-01-31_60d.csv", index=False, encoding="utf-8")
+            _write_price(root / "cache" / "baostock" / "stock_daily" / "adjusted" / "AAA01.csv", "AAA01", [("2024-01-31", 100), ("2024-02-01", 110)])
+            _write_price(root / "cache" / "baostock" / "index_daily" / "raw" / "CSI300.csv", "CSI300", [("2024-01-31", 1000), ("2024-02-01", 1020)])
+
+            result = run_portfolio_validation(
+                PortfolioValidationConfig(
+                    as_of_date="2024-01-31",
+                    horizon_days=1,
+                    outputs_dir=outputs,
+                    cache_dir=root / "cache",
+                    benchmark="CSI300",
+                    portfolio_ids=("high_confidence_top10",),
+                    limit=1,
+                    dry_run=True,
+                )
+            )
+
+            portfolio = result["portfolio_performance"][0]
+            self.assertAlmostEqual(portfolio["average_excess_return"], 0.08)
+            self.assertAlmostEqual(portfolio["outperform_rate"], 1.0)
+            self.assertAlmostEqual(portfolio["best_cases"][0]["benchmark_return"], 0.02)
+            self.assertAlmostEqual(portfolio["best_cases"][0]["future_excess_return"], 0.08)
+            self.assertEqual(portfolio["best_cases"][0]["outperformed_benchmark"], True)
+            self.assertEqual(result["summary"]["benchmark_symbol"], "CSI300")
+            self.assertEqual(result["summary"]["benchmark_data_quality"], "ok")
+
+    def test_benchmark_future_window_gap_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            outputs = root / "outputs"
+            (outputs / "lists").mkdir(parents=True)
+            (outputs / "validation").mkdir(parents=True)
+            _write_json(
+                outputs / "lists" / "high_confidence_candidates_2024-01-31.json",
+                {"list_id": "high_confidence_candidates", "as_of_date": "2024-01-31", "items": [_item("AAA01", 1)]},
+            )
+            pd.DataFrame(
+                [{"symbol": "AAA01", "future_return": 0.1, "future_excess_return": None, "benchmark_return": None, "outperformed_benchmark": None, "data_quality": "ok"}]
+            ).to_csv(outputs / "validation" / "walk_forward_predictions_2024-01-31_60d.csv", index=False, encoding="utf-8")
+            _write_price(root / "cache" / "baostock" / "stock_daily" / "adjusted" / "AAA01.csv", "AAA01", [("2024-01-31", 100), ("2024-02-01", 110)])
+            _write_price(root / "cache" / "baostock" / "index_daily" / "raw" / "CSI300.csv", "CSI300", [("2024-01-31", 1000)])
+
+            result = run_portfolio_validation(
+                PortfolioValidationConfig(
+                    as_of_date="2024-01-31",
+                    horizon_days=1,
+                    outputs_dir=outputs,
+                    cache_dir=root / "cache",
+                    benchmark="CSI300",
+                    portfolio_ids=("high_confidence_top10",),
+                    limit=1,
+                    dry_run=False,
+                )
+            )
+
+            portfolio = result["portfolio_performance"][0]
+            self.assertIsNone(portfolio["average_excess_return"])
+            self.assertIn("benchmark_missing", portfolio["notes"])
+            self.assertEqual(result["summary"]["benchmark_data_quality"], "benchmark_insufficient_future_window")
+            cache_plan = (outputs / "portfolios" / "portfolio_cache_plan_2024-01-31_1d_limit1.txt").read_text(encoding="utf-8")
+            self.assertIn("Benchmark data quality is benchmark_insufficient_future_window", cache_plan)
 
     def test_chinese_names_and_labels_are_written_as_utf8(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -161,10 +237,12 @@ class PortfolioSimulatorTests(unittest.TestCase):
 
             holdings_text = (outputs / "portfolios" / "portfolio_holdings_2024-01-31_60d.csv").read_text(encoding="utf-8")
             review_text = (outputs / "reviews" / "portfolio_review_2024-01-31_60d.json").read_text(encoding="utf-8")
+            summary_text = (outputs / "portfolios" / "portfolio_summary_2024-01-31_60d.json").read_text(encoding="utf-8")
             self.assertIn("保利发展", holdings_text)
             self.assertIn("趋势龙头型", holdings_text)
             self.assertIn("潜力蓄势型", holdings_text)
             self.assertIn("保利发展", review_text)
+            self.assertIn("保利发展", summary_text)
 
 
 def write_portfolio_fixture(root: Path) -> None:
