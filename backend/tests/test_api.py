@@ -576,7 +576,7 @@ class ApiTests(unittest.TestCase):
             response = client.get("/lists/rebound_watch")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("当前榜单为空", response.text)
+        self.assertIn("当前榜单暂无候选", response.text)
 
     def test_unknown_list_page_returns_friendly_404(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

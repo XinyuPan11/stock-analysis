@@ -91,9 +91,16 @@ Phase 2 Dashboard 页面：
 /stocks/{symbol}          单股详情页
 /reports/daily            每日报告
 /reports/stocks/{symbol}  单股报告
+/lists                    Phase 2.7 multi-list overview
+/lists/{list_id}          Phase 2.7 multi-list detail
+/labels                   Phase 2.7 label filtering
+/search                   Phase 2.7 stock search
 ```
 
 Phase 2 当前是本地只读 Dashboard 阶段性版本：只读取 `outputs/`，不拉数、不重算、不回测。阶段总结见 `PHASE2_SUMMARY.md`。
+
+Phase 2.7 research views are based on fixed historical outputs for 2024-01-31.
+They do not trigger data fetching or workflow reruns. See `PHASE2_7_DASHBOARD_SUMMARY.md`.
 
 ## Phase 2.5 一键本地日常流程
 

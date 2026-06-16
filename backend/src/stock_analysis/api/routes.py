@@ -1200,7 +1200,7 @@ def _list_cards(lists: list[dict[str, Any]]) -> str:
 
 def _list_preview(items: list[dict[str, Any]]) -> str:
     if not items:
-        return "<p class=\"muted\">当前榜单为空。</p>"
+        return "<p class=\"muted\">当前榜单暂无候选。</p>"
     rows = "".join(
         f"<li><a href=\"/stocks/{escape(str(item.get('symbol', '')))}\">{escape(str(item.get('symbol', '')))} {escape(str(item.get('name', '')))}</a></li>"
         for item in items[:5]
@@ -1211,7 +1211,7 @@ def _list_preview(items: list[dict[str, Any]]) -> str:
 
 def _list_items_table(items: list[dict[str, Any]]) -> str:
     if not items:
-        return "<p class=\"muted\">当前榜单为空。</p>"
+        return "<p class=\"muted\">当前榜单暂无候选。</p>"
     rows = []
     for item in items:
         if not isinstance(item, dict):
