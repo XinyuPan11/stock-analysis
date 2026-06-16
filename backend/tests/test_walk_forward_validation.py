@@ -72,6 +72,96 @@ class WalkForwardValidationTests(unittest.TestCase):
             self.assertIn('"status": "dry_run"', completed.stdout)
             self.assertFalse((root / "outputs" / "validation").exists())
 
+    def test_cli_without_dry_run_writes_and_refreshes_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_fixture(root, benchmark_symbol="sh.000300")
+            validation_dir = root / "outputs" / "validation"
+            validation_dir.mkdir(parents=True)
+            summary_path = validation_dir / "walk_forward_summary_2024-01-31_1d.json"
+            summary_path.write_text(json.dumps({"status": "stale", "valid_future_count": 0}), encoding="utf-8")
+            before = summary_path.stat().st_mtime_ns
+            script = Path(__file__).resolve().parents[1] / "scripts" / "run_walk_forward_validation.py"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--as-of-date",
+                    "2024-01-31",
+                    "--horizon-days",
+                    "1",
+                    "--outputs-dir",
+                    str(root / "outputs"),
+                    "--cache-dir",
+                    str(root / "cache"),
+                    "--list-ids",
+                    "trend_leaders",
+                    "--limit",
+                    "2",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn('"status": "ok"', completed.stdout)
+            self.assertIn('"dry_run": false', completed.stdout)
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "ok")
+            self.assertFalse(payload["dry_run"])
+            self.assertEqual(payload["symbol_count"], 2)
+            self.assertEqual(payload["valid_future_count"], 2)
+            self.assertEqual(payload["data_quality_counts"]["ok"], 2)
+            self.assertEqual(payload["benchmark_data_quality"], "ok")
+            self.assertGreaterEqual(summary_path.stat().st_mtime_ns, before)
+            self.assertTrue((validation_dir / "list_performance_2024-01-31_1d.json").exists())
+            self.assertTrue((validation_dir / "factor_effectiveness_2024-01-31_1d.json").exists())
+            self.assertTrue((validation_dir / "walk_forward_predictions_2024-01-31_1d.csv").exists())
+            self.assertTrue((validation_dir / "walk_forward_report_2024-01-31_1d.md").exists())
+
+    def test_cli_dry_run_does_not_refresh_existing_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_fixture(root, benchmark_symbol="sh.000300")
+            validation_dir = root / "outputs" / "validation"
+            validation_dir.mkdir(parents=True)
+            summary_path = validation_dir / "walk_forward_summary_2024-01-31_1d.json"
+            summary_path.write_text(json.dumps({"status": "stale", "valid_future_count": 0}), encoding="utf-8")
+            before_text = summary_path.read_text(encoding="utf-8")
+            script = Path(__file__).resolve().parents[1] / "scripts" / "run_walk_forward_validation.py"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--as-of-date",
+                    "2024-01-31",
+                    "--horizon-days",
+                    "1",
+                    "--outputs-dir",
+                    str(root / "outputs"),
+                    "--cache-dir",
+                    str(root / "cache"),
+                    "--list-ids",
+                    "trend_leaders",
+                    "--limit",
+                    "2",
+                    "--dry-run",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn('"status": "dry_run"', completed.stdout)
+            self.assertIn('"dry_run": true', completed.stdout)
+            self.assertEqual(summary_path.read_text(encoding="utf-8"), before_text)
+
     def test_write_output_json_contains_no_nan_or_infinity(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

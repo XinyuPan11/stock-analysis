@@ -17,7 +17,7 @@ from stock_analysis.validation.walk_forward import WalkForwardConfig, run_walk_f
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run read-only Phase 2.7.2 walk-forward validation from existing outputs/cache.")
+    parser = argparse.ArgumentParser(description="Run Phase 2.7.2 walk-forward validation from existing outputs/cache.")
     parser.add_argument("--start-date", default="", help="Reserved for multi-date validation; not used by the first single as-of implementation.")
     parser.add_argument("--end-date", default="", help="Reserved for multi-date validation; not used by the first single as-of implementation.")
     parser.add_argument("--as-of-date", required=True, help="Fixed research view date, for example 2024-01-31.")
@@ -27,8 +27,8 @@ def main() -> int:
     parser.add_argument("--cache-dir", default=str(REPO_ROOT / "data" / "cache" / "daily-use"), help="Existing local cache directory.")
     parser.add_argument("--list-ids", default="", help="Comma-separated list IDs. Defaults to supported Phase 2.7 lists.")
     parser.add_argument("--limit", type=int, default=50, help="Maximum symbols to evaluate. Use 0 for no limit.")
-    parser.add_argument("--dry-run", action="store_true", default=True, help="Default mode: calculate and print summary without writing outputs.")
-    parser.add_argument("--write-output", action="store_true", help="Write validation files under outputs/validation.")
+    parser.add_argument("--dry-run", action="store_true", help="Calculate and print summary without writing outputs.")
+    parser.add_argument("--write-output", action="store_true", help="Deprecated compatibility flag; output writing is the default unless --dry-run is set.")
     args = parser.parse_args()
 
     list_ids = tuple(item.strip() for item in args.list_ids.split(",") if item.strip())
@@ -40,7 +40,7 @@ def main() -> int:
         cache_dir=args.cache_dir,
         list_ids=list_ids or tuple(SUPPORTED_LIST_IDS),
         limit=None if args.limit == 0 else args.limit,
-        dry_run=not args.write_output,
+        dry_run=args.dry_run and not args.write_output,
     )
     result = run_walk_forward_validation(config)
     print(json.dumps(result["summary"], ensure_ascii=False, indent=2))

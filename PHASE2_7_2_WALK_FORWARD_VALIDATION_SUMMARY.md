@@ -34,7 +34,7 @@ Supported parameters:
 - `--dry-run`
 - `--write-output`
 
-Dry-run is the default behavior. Output files are written only when `--write-output` is passed.
+Use `--dry-run` for read-only checks that do not write files. When `--dry-run` is omitted, the CLI refreshes validation outputs under `outputs/validation`. `--write-output` is kept as a compatibility flag.
 
 ## Tests
 
@@ -126,5 +126,5 @@ Key boundaries:
 - Future price data is used only for validation labels and list/factor evaluation.
 - 20D validation should prepare cache through at least `2024-03-15`.
 - 60D validation should prepare cache through preferably `2024-05-31`.
-- Validation remains dry-run/read-only by default.
+- Validation remains read-only only when `--dry-run` is explicitly passed; otherwise the CLI refreshes validation output files from existing local outputs/cache.
 - Use `backend\scripts\generate_validation_cache_plan.py` before prewarm to avoid blindly refreshing unrelated symbols.

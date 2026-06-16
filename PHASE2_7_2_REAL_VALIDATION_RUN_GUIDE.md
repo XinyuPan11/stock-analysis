@@ -97,7 +97,7 @@ For a larger full validation universe, generate the plan with `--limit 0`, then 
 
 ## Step 5: Run 20D Validation Dry-run
 
-Dry-run is the default validation mode. It calculates summary metrics and writes no validation files.
+Dry-run mode calculates summary metrics and writes no validation files. Use `--dry-run` when you only want a read-only check.
 
 ```powershell
 python backend\scripts\run_walk_forward_validation.py --as-of-date 2024-01-31 --horizon-days 20 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 0 --dry-run
@@ -112,10 +112,10 @@ Expected success criteria:
 
 ## Step 6: Write 20D Validation Outputs
 
-Run this only after the dry-run looks healthy:
+Run this only after the dry-run looks healthy. Do not pass `--dry-run`; the CLI refreshes validation outputs by default.
 
 ```powershell
-python backend\scripts\run_walk_forward_validation.py --as-of-date 2024-01-31 --horizon-days 20 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 0 --write-output
+python backend\scripts\run_walk_forward_validation.py --as-of-date 2024-01-31 --horizon-days 20 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 0
 ```
 
 Expected output files:
@@ -152,7 +152,7 @@ Expected success criteria:
 ## Step 9: Write 60D Validation Outputs
 
 ```powershell
-python backend\scripts\run_walk_forward_validation.py --as-of-date 2024-01-31 --horizon-days 60 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 0 --write-output
+python backend\scripts\run_walk_forward_validation.py --as-of-date 2024-01-31 --horizon-days 60 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 0
 ```
 
 Expected output files:
@@ -176,7 +176,7 @@ Before trusting the result:
 - Review `missing_price` symbols and decide whether they are normal data gaps or blocking coverage issues.
 - Confirm `average_excess_return` and `outperform_rate` are populated when benchmark cache exists.
 - Confirm `factor_effectiveness` is not all `missing_factor` when score/factor fields exist.
-- Confirm output files are generated only when `--write-output` is used.
+- Confirm output files are generated only when `--dry-run` is omitted. `--write-output` is kept as a compatibility flag for older notes.
 
 ## Out of Scope
 
