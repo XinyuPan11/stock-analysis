@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
-from stock_analysis.api.output_loader import RESEARCH_LABELS, OutputLoader
+from stock_analysis.api.output_loader import API_DISCLAIMER, RESEARCH_LABELS, OutputLoader
 from stock_analysis.api.schemas import (
     BacktestResponse,
     CandidateDetailResponse,
@@ -131,12 +131,52 @@ def dashboard(
     return HTMLResponse(_dashboard_html(latest, candidates, summary, backtest, reports, workflow))
 
 
+@router.get("/lists", response_class=HTMLResponse)
+def lists_page(request: Request) -> HTMLResponse:
+    return HTMLResponse(_lists_overview_html(get_loader(request).get_research_lists()))
+
+
+@router.get("/lists/{list_id}", response_class=HTMLResponse)
+def list_detail_page(request: Request, list_id: str) -> HTMLResponse:
+    payload = get_loader(request).get_research_list(list_id)
+    if not payload.get("ok"):
+        return HTMLResponse(_message_page("榜单详情", payload.get("message", "Research list not found."), back_href="/lists"), status_code=404)
+    return HTMLResponse(_list_detail_html(payload))
+
+
+@router.get("/labels", response_class=HTMLResponse)
+def labels_page(
+    request: Request,
+    primary_type: str | None = None,
+    research_action: str | None = None,
+    risk_level: str | None = None,
+    limit: str | None = None,
+) -> HTMLResponse:
+    parsed_limit, error = _parse_optional_int(limit, "limit")
+    if error:
+        return HTMLResponse(_message_page("标签筛选", error, back_href="/labels"), status_code=400)
+    payload = get_loader(request).get_labels(
+        primary_type=primary_type,
+        research_action=research_action,
+        risk_level=risk_level,
+        limit=parsed_limit,
+    )
+    return HTMLResponse(_labels_html(payload))
+
+
+@router.get("/search", response_class=HTMLResponse)
+def search_page(request: Request, q: str = "") -> HTMLResponse:
+    if not q.strip():
+        return HTMLResponse(_search_html({"ok": True, "query": q, "count": 0, "items": [], "message": "请输入股票代码或名称。"}))
+    return HTMLResponse(_search_html(get_loader(request).search_stocks(q)))
+
+
 @router.get("/stocks/{symbol}", response_class=HTMLResponse)
 def stock_detail_page(request: Request, symbol: str) -> HTMLResponse:
-    detail = get_loader(request).get_candidate_by_symbol(symbol)
+    detail = get_loader(request).get_stock_research(symbol)
     if not detail["ok"]:
         return HTMLResponse(_message_page("候选股详情", detail["message"], back_href="/"), status_code=404)
-    return HTMLResponse(_stock_detail_html(detail))
+    return HTMLResponse(_stock_research_html(detail))
 
 
 @router.get("/compare", response_class=HTMLResponse)
@@ -774,6 +814,218 @@ def _guide_html(guide: dict[str, Any]) -> str:
     return _page_shell("A 股个人研究终端运行指引", body)
 
 
+def _lists_overview_html(payload: dict[str, Any]) -> str:
+    lists = payload.get("lists", [])
+    body = f"""
+    <header class="topbar">
+      <div>
+        <a href="/" class="back-link">返回首页</a>
+        <h1>多榜单总览</h1>
+        <p>当前为 fixed historical research view，日期为 {escape(str(payload.get("date") or ""))}。</p>
+      </div>
+      <span class="badge">Research Lists</span>
+    </header>
+
+    <section>
+      <h2>股票搜索</h2>
+      {_stock_search_form()}
+    </section>
+
+    <section>
+      <h2>榜单卡片</h2>
+      {_list_cards(lists)}
+    </section>
+
+    <p class="disclaimer">{escape(API_DISCLAIMER)}</p>
+    """
+    return _page_shell("多榜单总览", body)
+
+
+def _list_detail_html(payload: dict[str, Any]) -> str:
+    list_id = str(payload.get("list_id", ""))
+    is_risk_list = list_id == "high_risk_active"
+    risk_notice = "<p class=\"notice-text\">风险观察，不作为稳健候选。</p>" if is_risk_list else ""
+    body = f"""
+    <header class="topbar">
+      <div>
+        <a href="/lists" class="back-link">返回榜单总览</a>
+        <h1>{escape(str(payload.get("list_name") or list_id))}</h1>
+        <p>当前为 fixed historical research view，日期为 {escape(str(payload.get("date") or ""))}。</p>
+      </div>
+      <span class="badge">{escape(list_id)}</span>
+    </header>
+
+    <section>
+      <h2>榜单说明</h2>
+      <p>{escape(str(payload.get("description") or ""))}</p>
+      <dl>
+        <dt>sort_logic</dt><dd>{escape(str(payload.get("sort_logic") or ""))}</dd>
+        <dt>eligible_filters</dt><dd>{escape("; ".join(str(item) for item in _as_list(payload.get("eligible_filters"))))}</dd>
+        <dt>item_count</dt><dd>{escape(str(payload.get("item_count", 0)))}</dd>
+      </dl>
+      {risk_notice}
+    </section>
+
+    <section>
+      <h2>榜单股票</h2>
+      {_list_items_table(payload.get("items", []))}
+    </section>
+
+    <p class="disclaimer">{escape(API_DISCLAIMER)}</p>
+    """
+    return _page_shell(str(payload.get("list_name") or list_id), body)
+
+
+def _labels_html(payload: dict[str, Any]) -> str:
+    body = f"""
+    <header class="topbar">
+      <div>
+        <a href="/" class="back-link">返回首页</a>
+        <h1>标签筛选</h1>
+        <p>当前为 fixed historical research view，日期为 {escape(str(payload.get("date") or ""))}。</p>
+      </div>
+      <span class="badge">Labels</span>
+    </header>
+
+    <section>
+      <h2>筛选条件</h2>
+      {_label_filter_form(payload.get("filters", {}))}
+    </section>
+
+    <section>
+      <h2>统计</h2>
+      <div class="columns three">
+        <div><h3>primary_type</h3>{_distribution_list(payload.get("primary_type_counts", {}))}</div>
+        <div><h3>research_action</h3>{_distribution_list(payload.get("research_action_counts", {}))}</div>
+        <div><h3>risk_level</h3>{_distribution_list(payload.get("risk_level_counts", {}))}</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Labeled Candidates</h2>
+      {_list_items_table(payload.get("items", []))}
+    </section>
+
+    <p class="disclaimer">{escape(API_DISCLAIMER)}</p>
+    """
+    return _page_shell("标签筛选", body)
+
+
+def _search_html(payload: dict[str, Any]) -> str:
+    query = str(payload.get("query") or "")
+    body = f"""
+    <header class="topbar">
+      <div>
+        <a href="/" class="back-link">返回首页</a>
+        <h1>股票搜索</h1>
+        <p>支持股票代码、完整 symbol 和中文名称模糊搜索。</p>
+      </div>
+      <span class="badge">Search</span>
+    </header>
+
+    <section>
+      <h2>搜索</h2>
+      {_stock_search_form(query)}
+    </section>
+
+    <section>
+      <h2>搜索结果</h2>
+      {_search_results(payload)}
+    </section>
+
+    <p class="disclaimer">{escape(API_DISCLAIMER)}</p>
+    """
+    return _page_shell("股票搜索", body)
+
+
+def _stock_research_html(detail: dict[str, Any]) -> str:
+    symbol = str(detail.get("symbol") or "")
+    name = str(detail.get("name") or "")
+    score_breakdown = detail.get("score_breakdown", {}) if isinstance(detail.get("score_breakdown"), dict) else {}
+    score_cards = [
+        ("total_score", detail.get("total_score", "")),
+        ("momentum_score", score_breakdown.get("momentum_score", "")),
+        ("trend_score", score_breakdown.get("trend_score", "")),
+        ("relative_strength_score", score_breakdown.get("relative_strength_score", "")),
+        ("risk_score", score_breakdown.get("risk_score", "")),
+        ("liquidity_score", score_breakdown.get("liquidity_score", "")),
+    ]
+    body = f"""
+    <header class="topbar">
+      <div>
+        <a href="/" class="back-link">返回首页</a>
+        <h1>{escape(symbol)} {escape(name)}</h1>
+        <p>个股研究详情｜日期：{escape(str(detail.get("date") or ""))}</p>
+      </div>
+      <span class="tag-badge">{escape(str(detail.get("primary_type") or ""))}</span>
+    </header>
+
+    <section>
+      <h2>基本信息</h2>
+      <div class="grid">
+        <div class="metric"><span>rank</span><strong>{escape(str(detail.get("current_rank", "暂无")))}</strong></div>
+        <div class="metric"><span>research_action</span><strong>{escape(str(detail.get("research_action", "暂无")))}</strong></div>
+        <div class="metric"><span>confidence_level</span><strong>{escape(str(detail.get("confidence_level", "暂无")))}</strong></div>
+        <div class="metric"><span>risk_level</span><strong>{escape(str(detail.get("risk_level", "暂无")))}</strong></div>
+      </div>
+      <p><strong>secondary_tags:</strong> {escape("; ".join(str(item) for item in _as_list(detail.get("secondary_tags"))))}</p>
+    </section>
+
+    <section>
+      <h2>分数拆解</h2>
+      <div class="grid">
+        {''.join(f'<div class="metric"><span>{escape(label)}</span><strong>{escape(_format_metric(value) if value not in (None, "") else "暂无")}</strong></div>' for label, value in score_cards)}
+      </div>
+    </section>
+
+    <section class="columns">
+      <div>
+        <h2>标签解释</h2>
+        <p>{escape(str(detail.get("label_reason") or "暂无"))}</p>
+        <h3>confirmation_signals</h3>
+        {_plain_list(_as_list(detail.get("confirmation_signals")))}
+      </div>
+      <div>
+        <h2>失效信号</h2>
+        {_plain_list(_as_list(detail.get("invalidation_signals")))}
+      </div>
+    </section>
+
+    <section class="columns">
+      <div>
+        <h2>证据链</h2>
+        {_evidence_panel(detail.get("evidence", {}))}
+      </div>
+      <div>
+        <h2>风险与数据质量</h2>
+        <dl>
+          <dt>risk_flags</dt><dd>{escape(_fallback(detail.get("risk_flags"), "暂无"))}</dd>
+          <dt>warnings</dt><dd>{escape(_fallback(detail.get("warnings"), "暂无"))}</dd>
+          <dt>data_quality</dt><dd>{escape(_fallback(detail.get("data_quality"), "暂无"))}</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section>
+      <h2>因子解释</h2>
+      {_factor_summary_table(detail.get("factor_explanation", {}))}
+    </section>
+
+    <section>
+      <h2>所属榜单</h2>
+      {_related_lists(detail.get("related_lists", []))}
+    </section>
+
+    <section>
+      <h2>报告链接</h2>
+      {_research_report_links(detail.get("report_links", {}))}
+    </section>
+
+    <p class="disclaimer">{escape(API_DISCLAIMER)}</p>
+    """
+    return _page_shell(f"{symbol} 个股研究详情", body)
+
+
 def _stock_detail_html(detail: dict[str, Any]) -> str:
     row = detail["item"] or {}
     symbol = str(row.get("symbol") or detail.get("symbol") or "")
@@ -908,6 +1160,179 @@ def _message_page(title: str, message: str, *, back_href: str) -> str:
     <p class="disclaimer">仅为个人研究辅助，不构成投资建议。</p>
     """
     return _page_shell(title, body)
+
+
+def _stock_search_form(query: str = "") -> str:
+    return f"""
+    <form method="get" action="/search" class="filter-form">
+      <label>股票代码或名称
+        <input name="q" value="{escape(query)}" placeholder="600000 / sh.600000 / 平安">
+      </label>
+      <button type="submit">搜索</button>
+    </form>
+    """
+
+
+def _list_cards(lists: list[dict[str, Any]]) -> str:
+    if not lists:
+        return "<p class=\"muted\">暂无榜单输出，请先运行 generate_research_views.py。</p>"
+    cards = []
+    for item in lists:
+        list_id = str(item.get("list_id", ""))
+        preview = item.get("items_preview", [])
+        cards.append(
+            f"""
+            <div class="list-card">
+              <h3>{escape(str(item.get("list_name") or list_id))}</h3>
+              <p>{escape(str(item.get("description") or ""))}</p>
+              <dl>
+                <dt>item_count</dt><dd>{escape(str(item.get("item_count", 0)))}</dd>
+                <dt>sort_logic</dt><dd>{escape(str(item.get("sort_logic") or ""))}</dd>
+                <dt>eligible_filters</dt><dd>{escape("; ".join(str(x) for x in _as_list(item.get("eligible_filters"))))}</dd>
+              </dl>
+              {_list_preview(preview)}
+              <p><a class="primary-link" href="/lists/{escape(list_id)}">查看榜单详情</a></p>
+            </div>
+            """
+        )
+    return "<div class=\"list-grid\">" + "".join(cards) + "</div>"
+
+
+def _list_preview(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "<p class=\"muted\">当前榜单为空。</p>"
+    rows = "".join(
+        f"<li><a href=\"/stocks/{escape(str(item.get('symbol', '')))}\">{escape(str(item.get('symbol', '')))} {escape(str(item.get('name', '')))}</a></li>"
+        for item in items[:5]
+        if isinstance(item, dict)
+    )
+    return f"<ul>{rows}</ul>"
+
+
+def _list_items_table(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "<p class=\"muted\">当前榜单为空。</p>"
+    rows = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol", ""))
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(item.get('rank', '')))}</td>"
+            f"<td><a href=\"/stocks/{escape(symbol)}\">{escape(symbol)}</a></td>"
+            f"<td>{escape(str(item.get('name', '')))}</td>"
+            f"<td>{escape(_format_metric(item.get('total_score', '')))}</td>"
+            f"<td><span class=\"tag-badge\">{escape(str(item.get('primary_type', '')))}</span></td>"
+            f"<td>{escape('; '.join(str(x) for x in _as_list(item.get('secondary_tags'))))}</td>"
+            f"<td>{escape(str(item.get('research_action', '')))}</td>"
+            f"<td>{escape(str(item.get('confidence_level', '')))}</td>"
+            f"<td>{escape(str(item.get('risk_level', '')))}</td>"
+            f"<td>{escape(str(item.get('label_reason', '')))}</td>"
+            f"<td>{escape('; '.join(str(x) for x in _as_list(item.get('confirmation_signals'))))}</td>"
+            f"<td>{escape('; '.join(str(x) for x in _as_list(item.get('invalidation_signals'))))}</td>"
+            f"<td><a href=\"/stocks/{escape(symbol)}\">个股详情</a></td>"
+            "</tr>"
+        )
+    return f"""<div class="table-wrap"><table>
+<thead><tr><th>rank</th><th>symbol</th><th>name</th><th>total_score</th><th>primary_type</th><th>secondary_tags</th><th>research_action</th><th>confidence_level</th><th>risk_level</th><th>label_reason</th><th>confirmation_signals</th><th>invalidation_signals</th><th>detail</th></tr></thead>
+<tbody>{''.join(rows)}</tbody>
+</table></div>"""
+
+
+def _label_filter_form(filters: dict[str, Any]) -> str:
+    return f"""
+    <form method="get" action="/labels" class="filter-form">
+      <label>primary_type
+        <input name="primary_type" value="{escape(str(filters.get('primary_type') or ''))}">
+      </label>
+      <label>research_action
+        <input name="research_action" value="{escape(str(filters.get('research_action') or ''))}">
+      </label>
+      <label>risk_level
+        <input name="risk_level" value="{escape(str(filters.get('risk_level') or ''))}">
+      </label>
+      <label>limit
+        <input name="limit" type="number" min="1" value="{escape(str(filters.get('limit') or ''))}">
+      </label>
+      <button type="submit">应用</button>
+    </form>
+    """
+
+
+def _search_results(payload: dict[str, Any]) -> str:
+    items = payload.get("items", [])
+    if not payload.get("query"):
+        return f"<p class=\"muted\">{escape(str(payload.get('message') or '请输入搜索条件。'))}</p>"
+    if not items:
+        return "<p class=\"muted\">未在当前 fixed historical candidate set 中找到。</p>"
+    rows = []
+    for item in items:
+        symbol = str(item.get("symbol", ""))
+        report = item.get("report_links") if isinstance(item.get("report_links"), dict) else {}
+        report_link = report.get("page_url") or ""
+        report_cell = f'<a href="{escape(str(report_link))}">报告</a>' if report_link else "暂无"
+        rows.append(
+            "<tr>"
+            f"<td><a href=\"/stocks/{escape(symbol)}\">{escape(symbol)}</a></td>"
+            f"<td>{escape(str(item.get('name', '')))}</td>"
+            f"<td>{escape(str(item.get('rank', '')))}</td>"
+            f"<td>{escape(_format_metric(item.get('total_score', '')))}</td>"
+            f"<td>{escape(str(item.get('primary_type', '')))}</td>"
+            f"<td>{escape(str(item.get('research_action', '')))}</td>"
+            f"<td>{escape(str(item.get('confidence_level', '')))}</td>"
+            f"<td>{escape(str(item.get('risk_level', '')))}</td>"
+            f"<td><a href=\"/stocks/{escape(symbol)}\">进入个股详情页</a></td>"
+            f"<td>{report_cell}</td>"
+            "</tr>"
+        )
+    return f"""<div class="table-wrap"><table>
+<thead><tr><th>symbol</th><th>name</th><th>rank</th><th>total_score</th><th>primary_type</th><th>research_action</th><th>confidence_level</th><th>risk_level</th><th>detail</th><th>report</th></tr></thead>
+<tbody>{''.join(rows)}</tbody>
+</table></div>"""
+
+
+def _evidence_panel(evidence: Any) -> str:
+    payload = evidence if isinstance(evidence, dict) else {}
+    return (
+        "<dl>"
+        f"<dt>positive_evidence</dt><dd>{escape(_fallback(payload.get('positive'), '暂无'))}</dd>"
+        f"<dt>negative_evidence</dt><dd>{escape(_fallback(payload.get('negative'), '暂无'))}</dd>"
+        "</dl>"
+    )
+
+
+def _related_lists(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "<p class=\"muted\">当前未出现在任何多榜单中。</p>"
+    rows = "".join(
+        f"<li><a href=\"/lists/{escape(str(item.get('list_id', '')))}\">{escape(str(item.get('list_name') or item.get('list_id') or ''))}</a>，position {escape(str(item.get('position', '')))} / {escape(str(item.get('item_count', '')))}</li>"
+        for item in items
+        if isinstance(item, dict)
+    )
+    return f"<ul>{rows}</ul>"
+
+
+def _research_report_links(report: Any) -> str:
+    payload = report if isinstance(report, dict) else {}
+    links = []
+    if payload.get("markdown_url"):
+        links.append(f"<a class=\"primary-link\" href=\"{escape(str(payload['markdown_url']))}\">Markdown report</a>")
+    if payload.get("html_url"):
+        links.append(f"<a class=\"primary-link\" href=\"{escape(str(payload['html_url']))}\">HTML report</a>")
+    if payload.get("page_url"):
+        links.append(f"<a class=\"primary-link\" href=\"{escape(str(payload['page_url']))}\">浏览报告</a>")
+    if not links:
+        return "<p class=\"muted\">当前暂无报告链接。</p>"
+    return "<div class=\"link-row\">" + "".join(links) + "</div>"
+
+
+def _as_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if value in (None, ""):
+        return []
+    return [part for part in str(value).split(";") if part]
 
 
 def _summary_grid(summary: dict[str, Any]) -> str:
@@ -1450,6 +1875,9 @@ def _global_nav() -> str:
     links = [
         ("/", "Home"),
         ("/compare", "Compare"),
+        ("/lists", "Lists"),
+        ("/labels", "Labels"),
+        ("/search", "Search"),
         ("/reports", "Reports"),
         ("/health/outputs", "Output Health"),
         ("/guide", "Guide"),
@@ -1494,6 +1922,9 @@ section { margin-top: 24px; background: #ffffff; border: 1px solid #dde3ec; bord
 .columns.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .columns > div { min-width: 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.list-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.list-card { border: 1px solid #e0e5ed; border-radius: 8px; padding: 14px; background: #fbfcfe; }
+.list-card h3 { margin: 0 0 8px; font-size: 17px; }
 .filter-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 12px; align-items: end; }
 .filter-form label { display: grid; gap: 5px; color: #455468; font-size: 13px; }
 .filter-form input, .filter-form select { min-height: 34px; border: 1px solid #cfd6e1; border-radius: 6px; padding: 5px 8px; font: inherit; background: #fff; }

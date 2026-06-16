@@ -255,19 +255,17 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         text = response.text
         self.assertIn("sh.600016", text)
-        self.assertIn("民生银行", text)
-        self.assertIn("高置信候选", text)
+        self.assertIn("个股研究详情", text)
+        self.assertIn("趋势龙头型", text)
         self.assertIn("total_score", text)
-        self.assertIn("positive_evidence", text)
-        self.assertIn("因子贡献总览", text)
-        self.assertIn("主要正向因子", text)
-        self.assertIn("主要负向/风险因子", text)
-        self.assertIn("需要继续观察的信号", text)
-        self.assertIn("分数解释", text)
-        self.assertIn("因子贡献表", text)
-        self.assertIn("单股报告", text)
+        self.assertIn("分数拆解", text)
+        self.assertIn("标签解释", text)
+        self.assertIn("证据链", text)
+        self.assertIn("风险与数据质量", text)
+        self.assertIn("所属榜单", text)
+        self.assertIn("报告链接", text)
         self.assertIn("返回首页", text)
-        self.assertIn("仅为个人研究辅助，不构成投资建议", text)
+        self.assertIn("不构成投资建议", text)
 
     def test_compare_page_returns_html(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -543,6 +541,80 @@ class ApiTests(unittest.TestCase):
         self.assertIn("run_daily_workflow.py", response.text)
         self.assertIn("data\\cache\\daily-use", response.text)
 
+    def test_lists_page_returns_html_and_contains_list_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/lists")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("多榜单总览", response.text)
+        self.assertIn("high_confidence_candidates", response.text)
+        self.assertIn("查看榜单详情", response.text)
+        self.assertIn("fixed historical research view", response.text)
+        self.assertIn("不构成投资建议", response.text)
+
+    def test_list_detail_page_returns_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/lists/high_confidence_candidates")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("high_confidence_candidates", response.text)
+        self.assertIn("sh.600016", response.text)
+        self.assertIn("个股详情", response.text)
+        self.assertIn("confirmation_signals", response.text)
+
+    def test_empty_list_detail_page_returns_200(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/lists/rebound_watch")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("当前榜单为空", response.text)
+
+    def test_unknown_list_page_returns_friendly_404(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/lists/not_exist")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("Unknown list_id", response.text)
+
+    def test_search_page_has_search_entry_and_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            empty = client.get("/search")
+            response = client.get("/search", params={"q": "000001"})
+
+        self.assertEqual(empty.status_code, 200)
+        self.assertIn("股票搜索", empty.text)
+        self.assertIn("请输入股票代码或名称", empty.text)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("sz.000001", response.text)
+        self.assertIn("进入个股详情页", response.text)
+
+    def test_labels_page_returns_html_and_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/labels", params={"primary_type": "趋势龙头型"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("标签筛选", response.text)
+        self.assertIn("趋势龙头型", response.text)
+        self.assertIn("Labeled Candidates", response.text)
+
     def test_research_lists_api_returns_all_lists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             _write_outputs(temp_dir)
@@ -754,7 +826,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(candidate.status_code, 404)
         self.assertIn("No candidate found", candidate.json()["message"])
         self.assertEqual(stock_page.status_code, 404)
-        self.assertIn("No candidate found", stock_page.text)
+        self.assertIn("Symbol not found", stock_page.text)
         self.assertEqual(report_page.status_code, 404)
         self.assertIn("No stock report found for this symbol", report_page.text)
         self.assertEqual(report_api.status_code, 404)
@@ -768,6 +840,10 @@ class ApiTests(unittest.TestCase):
             texts = [
                 client.get("/").text,
                 client.get("/compare").text,
+                client.get("/lists").text,
+                client.get("/lists/high_confidence_candidates").text,
+                client.get("/labels").text,
+                client.get("/search?q=600000").text,
                 client.get("/reports").text,
                 client.get("/health/outputs").text,
                 client.get("/guide").text,

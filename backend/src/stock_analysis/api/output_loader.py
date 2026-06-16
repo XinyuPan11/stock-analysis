@@ -623,7 +623,18 @@ class OutputLoader:
 
     def get_stock_research(self, symbol: str) -> dict[str, Any]:
         requested = symbol.strip()
-        rows = self._load_label_rows(self.latest_label_date())
+        label_date = self.latest_label_date()
+        if not label_date:
+            return {
+                "ok": False,
+                "message": NO_DAILY_OUTPUT_MESSAGE,
+                "date": None,
+                "symbol": self._normalize_symbol_with_prefix(requested),
+                "data_quality": "missing_outputs",
+                "failed_symbol": None,
+                "disclaimer": API_DISCLAIMER,
+            }
+        rows = self._load_label_rows(label_date)
         label_row = next((row for row in rows if self._symbol_matches(str(row.get("symbol", "")), requested)), None)
         normalized = str(label_row.get("symbol")) if label_row else self._normalize_symbol_with_prefix(requested)
         failed = self._failed_symbol_detail(requested)
@@ -631,7 +642,7 @@ class OutputLoader:
             return {
                 "ok": False,
                 "message": "Symbol not found in current fixed historical candidate label set.",
-                "date": self.latest_label_date(),
+                "date": label_date,
                 "symbol": normalized,
                 "data_quality": "failed_symbol" if failed else "not_in_candidate_labels",
                 "failed_symbol": failed,
