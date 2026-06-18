@@ -69,8 +69,18 @@ def build_forward_expansion_plan(config: ForwardExpansionConfig) -> dict[str, ob
                 "full_market_later": True,
                 "cache_dir": str(config.cache_dir),
                 "manual_prewarm_command": _prewarm_command(config, start_date, end_date, config.recommended_limit),
-                "manual_walk_forward_command": _walk_forward_command(config, horizon_days=_horizon_for_batch(batch_id), limit=config.recommended_limit),
-                "manual_portfolio_validation_command": _portfolio_command(config, horizon_days=_horizon_for_batch(batch_id), limit=config.recommended_limit),
+                "manual_controlled_validation_dry_run_command": _controlled_validation_command(
+                    config,
+                    horizon_days=_horizon_for_batch(batch_id),
+                    limit=config.recommended_limit,
+                    write_output=False,
+                ),
+                "manual_controlled_validation_write_command": _controlled_validation_command(
+                    config,
+                    horizon_days=_horizon_for_batch(batch_id),
+                    limit=config.recommended_limit,
+                    write_output=True,
+                ),
                 "cache_coverage_command": _coverage_command(config, start_date, end_date, config.recommended_limit),
                 "expected_outputs": _expected_outputs(config, _horizon_for_batch(batch_id), config.recommended_limit),
                 "estimated_risk": _risk_for_batch(batch_id),
@@ -138,16 +148,16 @@ def markdown_forward_expansion_plan(plan: dict[str, object]) -> str:
                 str(batch.get("cache_coverage_command", "")),
                 "```",
                 "",
-                "Walk-forward validation command:",
+                "Controlled validation dry-run command:",
                 "",
                 "```powershell",
-                str(batch.get("manual_walk_forward_command", "")),
+                str(batch.get("manual_controlled_validation_dry_run_command", "")),
                 "```",
                 "",
-                "Portfolio validation command:",
+                "Controlled validation write-output command:",
                 "",
                 "```powershell",
-                str(batch.get("manual_portfolio_validation_command", "")),
+                str(batch.get("manual_controlled_validation_write_command", "")),
                 "```",
                 "",
             ]
@@ -262,20 +272,13 @@ def _coverage_command(config: ForwardExpansionConfig, start_date: str, end_date:
     )
 
 
-def _walk_forward_command(config: ForwardExpansionConfig, *, horizon_days: int, limit: int) -> str:
-    return (
-        "python backend\\scripts\\run_walk_forward_validation.py "
+def _controlled_validation_command(config: ForwardExpansionConfig, *, horizon_days: int, limit: int, write_output: bool) -> str:
+    command = (
+        "python backend\\scripts\\run_controlled_validation_batch.py "
         f"--as-of-date {config.as_of_date} --horizon-days {horizon_days} --benchmark {config.benchmark} "
         f"--outputs-dir outputs --cache-dir {config.cache_dir} --limit {limit}"
     )
-
-
-def _portfolio_command(config: ForwardExpansionConfig, *, horizon_days: int, limit: int) -> str:
-    return (
-        "python backend\\scripts\\run_portfolio_validation.py "
-        f"--as-of-date {config.as_of_date} --horizon-days {horizon_days} --benchmark {config.benchmark} "
-        f"--outputs-dir outputs --cache-dir {config.cache_dir} --limit {limit}"
-    )
+    return f"{command} --write-output" if write_output else command
 
 
 def _expected_outputs(config: ForwardExpansionConfig, horizon_days: int, limit: int) -> list[str]:

@@ -36,6 +36,10 @@ class ControlledValidationBatchTests(unittest.TestCase):
             self.assertTrue(result["dry_run"])
             self.assertFalse(result["provider_access"])
             self.assertTrue(result["no_full_market_workflow"])
+            self.assertEqual(
+                result["portfolio_summary"]["smoke_note"],
+                "This limit-10 smoke validates the framework only. It is not evidence of model effectiveness.",
+            )
             self.assertEqual(result["outputs"]["walk_forward"], {})
             self.assertEqual(result["outputs"]["portfolio"], {})
             self.assertFalse((root / "outputs" / "portfolios").exists())

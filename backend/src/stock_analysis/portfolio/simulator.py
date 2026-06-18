@@ -88,7 +88,7 @@ def run_portfolio_validation(config: PortfolioValidationConfig) -> dict[str, obj
         "missing_future_label_symbols": _missing_label_symbols(required_symbols, future_labels),
         "non_ok_future_label_symbols": _non_ok_label_symbols(required_symbols, future_labels),
         "transaction_cost_bps": config.transaction_cost_bps,
-        "smoke_note": "This limit-50 smoke validates the framework only. It is not evidence of model effectiveness." if config.limit else "",
+        "smoke_note": f"This limit-{config.limit} smoke validates the framework only. It is not evidence of model effectiveness." if config.limit else "",
     }
     result: dict[str, object] = {
         "summary": summary,

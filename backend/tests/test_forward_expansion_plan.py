@@ -22,6 +22,9 @@ class ForwardExpansionPlanTests(unittest.TestCase):
         self.assertEqual(plan["batches"][0]["start_date"], "2024-02-01")
         self.assertEqual(plan["batches"][2]["end_date"], "2024-12-31")
         self.assertIn("--limit 50", plan["batches"][0]["manual_prewarm_command"])
+        self.assertIn("run_controlled_validation_batch.py", plan["batches"][0]["manual_controlled_validation_dry_run_command"])
+        self.assertNotIn("--dry-run", plan["batches"][0]["manual_controlled_validation_dry_run_command"])
+        self.assertIn("--write-output", plan["batches"][0]["manual_controlled_validation_write_command"])
         self.assertNotIn("run_daily_workflow.py", json.dumps(plan, ensure_ascii=False))
 
     def test_forward_plan_writes_json_and_markdown(self) -> None:
@@ -35,7 +38,10 @@ class ForwardExpansionPlanTests(unittest.TestCase):
             self.assertTrue(md_path.exists())
             payload = json.loads(json_path.read_text(encoding="utf-8"))
             self.assertEqual(len(payload["batches"]), 3)
-            self.assertIn("Do not let Codex run full-market workflow", md_path.read_text(encoding="utf-8"))
+            markdown = md_path.read_text(encoding="utf-8")
+            self.assertIn("Do not let Codex run full-market workflow", markdown)
+            self.assertIn("run_controlled_validation_batch.py", markdown)
+            self.assertNotIn("--dry-run", markdown)
 
     def test_plan_cli_does_not_access_provider(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -75,9 +75,9 @@ For each batch and limit step:
 
 - cache coverage check completes locally;
 - missing symbols are explainable;
-- walk-forward dry-run reports usable future labels;
-- portfolio validation dry-run reports usable benchmark and future labels;
-- formal outputs are refreshed only when the user intentionally omits dry-run or passes an explicit write flag;
+- controlled validation default dry-run reports usable walk-forward future labels;
+- controlled validation default dry-run reports usable portfolio benchmark and future labels;
+- formal outputs are refreshed only when the user intentionally passes `--write-output`;
 - no full-market workflow runs during this preparation phase.
 
 ## When to Enter 2025
@@ -88,4 +88,3 @@ Move to 2025 only after:
 - larger 2024 validation runs are manually completed and documented;
 - missing cache and data-quality issues are understood;
 - the 2024 review does not reveal blocking design issues.
-

@@ -45,18 +45,20 @@ Success criteria:
 - `missing_symbols` are reviewable
 - no provider access occurs during coverage check
 
-## Batch 1: Walk-forward Validation
+## Batch 1: Controlled Validation Dry-run
 
-Dry-run first:
+The helper chains walk-forward and portfolio validation. It defaults to dry-run and does not access a provider.
 
 ```powershell
-python backend\scripts\run_walk_forward_validation.py --as-of-date 2024-01-31 --horizon-days 60 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 50 --dry-run
+python backend\scripts\run_controlled_validation_batch.py --as-of-date 2024-01-31 --horizon-days 60 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 50
 ```
 
-Write outputs only after the dry-run looks healthy:
+## Batch 1: Controlled Validation Write-output
+
+Use `--write-output` only when you intentionally want to refresh validation and portfolio files:
 
 ```powershell
-python backend\scripts\run_walk_forward_validation.py --as-of-date 2024-01-31 --horizon-days 60 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 50
+python backend\scripts\run_controlled_validation_batch.py --as-of-date 2024-01-31 --horizon-days 60 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 50 --write-output
 ```
 
 Expected output files:
@@ -67,34 +69,11 @@ outputs/validation/list_performance_2024-01-31_60d.json
 outputs/validation/factor_effectiveness_2024-01-31_60d.json
 outputs/validation/walk_forward_predictions_2024-01-31_60d.csv
 outputs/validation/walk_forward_report_2024-01-31_60d.md
-```
-
-## Batch 1: Portfolio Validation
-
-Dry-run first:
-
-```powershell
-python backend\scripts\run_portfolio_validation.py --as-of-date 2024-01-31 --horizon-days 60 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 50 --dry-run
-```
-
-Write outputs only after the dry-run looks healthy:
-
-```powershell
-python backend\scripts\run_portfolio_validation.py --as-of-date 2024-01-31 --horizon-days 60 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 50
-```
-
-## Controlled Batch Helper
-
-The helper chains walk-forward and portfolio validation. It defaults to dry-run and does not access a provider.
-
-```powershell
-python backend\scripts\run_controlled_validation_batch.py --as-of-date 2024-01-31 --horizon-days 60 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 50
-```
-
-Use `--write-output` only when you intentionally want to refresh validation and portfolio files:
-
-```powershell
-python backend\scripts\run_controlled_validation_batch.py --as-of-date 2024-01-31 --horizon-days 60 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 50 --write-output
+outputs/portfolios/portfolio_summary_2024-01-31_60d.json
+outputs/portfolios/portfolio_holdings_2024-01-31_60d.csv
+outputs/portfolios/portfolio_report_2024-01-31_60d.md
+outputs/reviews/portfolio_review_2024-01-31_60d.json
+outputs/experiments/strategy_experiments_2024-01-31_60d.json
 ```
 
 ## Batch 2 And Batch 3 Templates
@@ -121,4 +100,3 @@ For each batch, move from `limit 50` to `limit 300` to `limit 1000` only after t
 - cache coverage gaps are documented
 - outputs are generated only when a write command is intentionally used
 - no latest-date refresh is mixed into this phase
-
