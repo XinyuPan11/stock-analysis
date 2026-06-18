@@ -8,6 +8,7 @@ Do not let Codex run full-year prewarm.
 Do not let Codex run full-market workflow.
 Do not let Codex run full-market backtest.
 Do not enter 2025 from this phase.
+Keep this phase price-only / technical-only.
 
 ## Generate The Plan
 

@@ -17,6 +17,7 @@ No future leakage.
 
 - Signals, labels, lists, rankings, and portfolios remain fixed as of `2024-01-31`.
 - Forward price data is used only for validation labels and review metrics.
+- The project remains price-only / technical-only in this phase.
 - This phase does not rerun scoring, factors, list generation, full workflow, or full-market backtest.
 - Codex should not run long provider jobs in this phase.
 
