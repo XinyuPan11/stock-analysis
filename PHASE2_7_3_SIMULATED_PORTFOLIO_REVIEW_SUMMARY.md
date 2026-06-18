@@ -74,6 +74,9 @@ Non-dry-run writes:
 - `outputs/portfolios/portfolio_holdings_YYYY-MM-DD_{horizon}d.csv`
 - `outputs/portfolios/portfolio_report_YYYY-MM-DD_{horizon}d.md`
 - `outputs/portfolios/portfolio_cache_plan_YYYY-MM-DD_{horizon}d_limit{N}.txt`
+- `outputs/portfolios/portfolio_cache_plan_YYYY-MM-DD_{horizon}d_limit{N}.md`
+- `outputs/portfolios/benchmark_cache_plan_YYYY-MM-DD_{horizon}d.txt`
+- `outputs/portfolios/benchmark_cache_plan_YYYY-MM-DD_{horizon}d.md`
 - `outputs/reviews/portfolio_review_YYYY-MM-DD_{horizon}d.json`
 - `outputs/reviews/portfolio_review_YYYY-MM-DD_{horizon}d.md`
 - `outputs/experiments/strategy_experiments_YYYY-MM-DD_{horizon}d.json`
@@ -82,7 +85,9 @@ Non-dry-run writes:
 
 Portfolio validation now builds holdings first, then loads or computes future labels for the exact holding symbols. `--limit 50` limits the required holding symbols for the smoke run; it does not take the first 50 unrelated rows from the walk-forward predictions CSV.
 
-Benchmark excess-return fields are preserved when present in `walk_forward_predictions`, and missing excess-return fields are recomputed from local cache only. Benchmark loading checks the aliases `CSI300`, `sh.000300`, and `000300.SH`. If the benchmark future window is unavailable, the summary and cache plan report `benchmark_data_quality`, for example `benchmark_insufficient_future_window`; excess-return metrics should not be interpreted until benchmark future-window cache is prepared.
+Benchmark excess-return fields are preserved when present in `walk_forward_predictions`, and missing excess-return fields are recomputed from local cache only. Benchmark loading checks the aliases `CSI300`, `sh.000300`, and `000300.SH`, and can stitch benchmark entry-day and future-window cache files across those aliases. If the benchmark future window is unavailable, the summary and cache plan report `benchmark_data_quality`, for example `benchmark_insufficient_future_window`; excess-return metrics should not be interpreted until benchmark future-window cache is prepared.
+
+Cache-plan `.txt` files contain only executable symbol lines such as `sh.600000` or `sz.000001`. Explanation text is written to companion `.md` files, so the `.txt` files can be passed directly to cache prewarm commands.
 
 The cache plan distinguishes missing labels from non-ok labels:
 

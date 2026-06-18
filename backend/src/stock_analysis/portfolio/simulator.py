@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -58,6 +59,7 @@ def run_portfolio_validation(config: PortfolioValidationConfig) -> dict[str, obj
     )
     benchmark_data_quality = str(future_labels.attrs.get("benchmark_data_quality", "benchmark_missing"))
     benchmark_symbol = str(future_labels.attrs.get("benchmark_symbol", config.benchmark))
+    benchmark_aliases_tried = list(future_labels.attrs.get("benchmark_aliases_tried", _portfolio_benchmark_aliases(config.benchmark)))
     performance = evaluate_portfolios(
         holdings_by_portfolio,
         future_labels,
@@ -75,6 +77,7 @@ def run_portfolio_validation(config: PortfolioValidationConfig) -> dict[str, obj
         "benchmark": config.benchmark,
         "benchmark_symbol": benchmark_symbol,
         "benchmark_data_quality": benchmark_data_quality,
+        "benchmark_aliases_tried": benchmark_aliases_tried,
         "dry_run": config.dry_run,
         "no_future_leakage": True,
         "research_only": True,
@@ -206,6 +209,7 @@ def load_future_labels_for_symbols(
         )
     result.attrs["benchmark_symbol"] = benchmark_symbol
     result.attrs["benchmark_data_quality"] = benchmark_quality if benchmark_quality != "ok" else _benchmark_quality_from_labels(result, fallback=benchmark_quality)
+    result.attrs["benchmark_aliases_tried"] = _portfolio_benchmark_aliases(benchmark)
     return result
 
 
@@ -223,6 +227,9 @@ def write_portfolio_outputs(config: PortfolioValidationConfig, result: dict[str,
         "portfolio_holdings": portfolio_dir / f"portfolio_holdings_{suffix}.csv",
         "portfolio_report": portfolio_dir / f"portfolio_report_{suffix}.md",
         "portfolio_cache_plan": portfolio_dir / f"portfolio_cache_plan_{suffix}_limit{config.limit or 'all'}.txt",
+        "portfolio_cache_plan_md": portfolio_dir / f"portfolio_cache_plan_{suffix}_limit{config.limit or 'all'}.md",
+        "benchmark_cache_plan": portfolio_dir / f"benchmark_cache_plan_{suffix}.txt",
+        "benchmark_cache_plan_md": portfolio_dir / f"benchmark_cache_plan_{suffix}.md",
         "portfolio_review_json": review_dir / f"portfolio_review_{suffix}.json",
         "portfolio_review_md": review_dir / f"portfolio_review_{suffix}.md",
         "strategy_experiments": experiment_dir / f"strategy_experiments_{suffix}.json",
@@ -230,7 +237,10 @@ def write_portfolio_outputs(config: PortfolioValidationConfig, result: dict[str,
     _write_json(paths["portfolio_summary"], {"summary": result["summary"], "portfolios": result["portfolio_performance"]})
     pd.DataFrame(sanitize_for_json(result["holdings"])).to_csv(paths["portfolio_holdings"], index=False, encoding="utf-8")
     paths["portfolio_report"].write_text(markdown_portfolio_report(result), encoding="utf-8")
-    paths["portfolio_cache_plan"].write_text(_cache_plan_text(result), encoding="utf-8")
+    paths["portfolio_cache_plan"].write_text(_symbol_plan_text(_portfolio_cache_plan_symbols(result)), encoding="utf-8")
+    paths["portfolio_cache_plan_md"].write_text(_cache_plan_markdown(result), encoding="utf-8")
+    paths["benchmark_cache_plan"].write_text(_symbol_plan_text(_benchmark_cache_plan_symbols(result)), encoding="utf-8")
+    paths["benchmark_cache_plan_md"].write_text(_benchmark_cache_plan_markdown(result), encoding="utf-8")
     _write_json(paths["portfolio_review_json"], result["review"])
     paths["portfolio_review_md"].write_text(markdown_review_report(result["review"]), encoding="utf-8")
     _write_json(paths["strategy_experiments"], result["experiments"])
@@ -376,27 +386,74 @@ def _symbols_needing_cache_refresh(required_symbols: list[str], labels: pd.DataF
 
 
 def _load_benchmark_history_for_horizon(cache_dir: Path, *, benchmark: str, as_of_date: str, horizon_days: int) -> tuple[pd.DataFrame, str, str]:
+    aliases = _portfolio_benchmark_aliases(benchmark)
     fallback = pd.DataFrame()
-    fallback_symbol = benchmark_aliases(benchmark)[0]
+    fallback_symbol = _benchmark_cache_plan_symbol(benchmark)
     fallback_quality = "benchmark_missing"
-    for alias in benchmark_aliases(benchmark):
-        frame = load_cached_price_history(cache_dir, provider="baostock", symbol=alias, dataset="index_daily", adjusted=False)
-        if frame.empty:
-            continue
-        if fallback.empty:
-            fallback = frame
-            fallback_symbol = alias
+    frames_by_alias: dict[str, list[pd.DataFrame]] = {alias: [] for alias in aliases}
+    for alias in aliases:
+        for dataset, adjusted in [("index_daily", False), ("stock_daily", True)]:
+            frame = load_cached_price_history(cache_dir, provider="baostock", symbol=alias, dataset=dataset, adjusted=adjusted)
+            if frame.empty:
+                continue
+            frames_by_alias[alias].append(frame)
+            if fallback.empty:
+                fallback = frame
+                fallback_symbol = alias
+            label = calculate_future_return_label(
+                alias,
+                frame,
+                as_of_date=as_of_date,
+                horizon_days=horizon_days,
+                benchmark_history=None,
+            )
+            if label.get("data_quality") == "ok":
+                return frame, alias, "ok"
+            fallback_quality = f"benchmark_{label.get('data_quality', 'missing_price')}"
+    stitched = _stitch_price_frames([frame for frames in frames_by_alias.values() for frame in frames])
+    if not stitched.empty:
+        stitched_symbol = _resolved_stitched_benchmark_symbol(frames_by_alias, benchmark)
         label = calculate_future_return_label(
-            alias,
-            frame,
+            stitched_symbol,
+            stitched,
             as_of_date=as_of_date,
             horizon_days=horizon_days,
             benchmark_history=None,
         )
         if label.get("data_quality") == "ok":
-            return frame, alias, "ok"
+            return stitched, stitched_symbol, "ok"
+        fallback = stitched
+        fallback_symbol = stitched_symbol
         fallback_quality = f"benchmark_{label.get('data_quality', 'missing_price')}"
     return fallback, fallback_symbol, fallback_quality
+
+
+def _portfolio_benchmark_aliases(benchmark: str) -> list[str]:
+    result: list[str] = []
+    for alias in [str(benchmark or "").strip(), *benchmark_aliases(benchmark)]:
+        if alias and alias not in result:
+            result.append(alias)
+    return result
+
+
+def _stitch_price_frames(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    valid = [frame for frame in frames if frame is not None and not frame.empty]
+    if not valid:
+        return pd.DataFrame()
+    combined = pd.concat(valid, ignore_index=True)
+    if "trade_date" not in combined.columns:
+        return pd.DataFrame()
+    return combined.sort_values("trade_date").drop_duplicates("trade_date", keep="last").reset_index(drop=True)
+
+
+def _resolved_stitched_benchmark_symbol(frames_by_alias: dict[str, list[pd.DataFrame]], benchmark: str) -> str:
+    for alias in benchmark_aliases(benchmark):
+        if frames_by_alias.get(alias):
+            return alias
+    for alias, frames in frames_by_alias.items():
+        if frames:
+            return alias
+    return _benchmark_cache_plan_symbol(benchmark)
 
 
 def _benchmark_quality_from_labels(labels: pd.DataFrame, *, fallback: str) -> str:
@@ -408,19 +465,34 @@ def _benchmark_quality_from_labels(labels: pd.DataFrame, *, fallback: str) -> st
     return qualities[0] if qualities else fallback
 
 
-def _cache_plan_text(result: dict[str, object]) -> str:
+def _portfolio_cache_plan_symbols(result: dict[str, object]) -> list[str]:
+    summary = result.get("summary", {})
+    missing = summary.get("missing_future_label_symbols") or []
+    non_ok = summary.get("non_ok_future_label_symbols") or []
+    return _valid_symbol_lines([*missing, *non_ok])
+
+
+def _benchmark_cache_plan_symbols(result: dict[str, object]) -> list[str]:
+    summary = result.get("summary", {})
+    benchmark_quality = str(summary.get("benchmark_data_quality") or "benchmark_missing")
+    if benchmark_quality == "ok":
+        return []
+    return _valid_symbol_lines([_benchmark_cache_plan_symbol(str(summary.get("benchmark") or "CSI300"))])
+
+
+def _symbol_plan_text(symbols: list[str]) -> str:
+    return "\n".join(symbols) + ("\n" if symbols else "")
+
+
+def _cache_plan_markdown(result: dict[str, object]) -> str:
     summary = result.get("summary", {})
     missing = summary.get("missing_future_label_symbols") or []
     benchmark_quality = str(summary.get("benchmark_data_quality") or "benchmark_missing")
-    non_ok: list[str] = []
-    for row in result.get("portfolio_performance", []):
-        if isinstance(row, dict):
-            non_ok.extend(str(symbol) for symbol in row.get("non_ok_future_label_symbols") or [])
-    non_ok = sorted(set(non_ok))
+    non_ok = _portfolio_cache_plan_symbols(result)
     lines = [
         "# Portfolio Future Label Coverage Plan",
         "",
-        "This file lists portfolio holdings that still need future-label cache/validation prep.",
+        "The companion .txt file contains only executable stock symbols for cache prewarm.",
         "Do not use future labels to generate as-of portfolios. No future leakage.",
         "",
         f"As-of date: {summary.get('as_of_date')}",
@@ -430,6 +502,7 @@ def _cache_plan_text(result: dict[str, object]) -> str:
         f"Required symbols: {summary.get('required_symbol_count')}",
         f"Missing future labels: {len(missing)}",
         f"Non-ok future labels: {len(non_ok)}",
+        f"Benchmark aliases tried: {summary.get('benchmark_aliases_tried')}",
         "",
     ]
     if missing:
@@ -449,6 +522,47 @@ def _cache_plan_text(result: dict[str, object]) -> str:
             ]
         )
     return "\n".join(lines) + "\n"
+
+
+def _benchmark_cache_plan_markdown(result: dict[str, object]) -> str:
+    summary = result.get("summary", {})
+    symbols = _benchmark_cache_plan_symbols(result)
+    lines = [
+        "# Benchmark Future Window Cache Plan",
+        "",
+        "The companion .txt file contains only executable benchmark symbols for cache prewarm.",
+        "",
+        f"Benchmark input: {summary.get('benchmark')}",
+        f"Benchmark symbol: {summary.get('benchmark_symbol')}",
+        f"Benchmark data quality: {summary.get('benchmark_data_quality')}",
+        f"Benchmark aliases tried: {summary.get('benchmark_aliases_tried')}",
+        "",
+        "## Symbols",
+        "",
+    ]
+    lines.extend(symbols or ["No benchmark cache prep needed."])
+    return "\n".join(lines) + "\n"
+
+
+def _benchmark_cache_plan_symbol(benchmark: str) -> str:
+    for alias in benchmark_aliases(benchmark):
+        if _is_valid_symbol_line(alias):
+            return alias
+    value = str(benchmark or "").strip()
+    return value if _is_valid_symbol_line(value) else benchmark_aliases(benchmark)[0]
+
+
+def _valid_symbol_lines(symbols: Iterable[str]) -> list[str]:
+    result: list[str] = []
+    for symbol in symbols:
+        value = str(symbol or "").strip()
+        if value and value not in result and _is_valid_symbol_line(value):
+            result.append(value)
+    return result
+
+
+def _is_valid_symbol_line(value: str) -> bool:
+    return bool(re.fullmatch(r"(sh|sz)\.\d{6}", str(value or "").strip()))
 
 
 def _write_json(path: Path, payload: object) -> None:
