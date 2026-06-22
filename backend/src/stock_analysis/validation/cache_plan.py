@@ -84,6 +84,7 @@ def default_output_file(outputs_dir: str | Path, as_of_date: str, horizon_days: 
 
 
 def _load_validation_symbols(outputs_dir: Path, as_of_date: str, *, limit: int | None) -> list[str]:
+    symbols: list[str] = []
     for path in [
         outputs_dir / "labels" / f"stock_labels_{as_of_date}.json",
         outputs_dir / "labels" / f"candidate_labels_{as_of_date}.json",
@@ -96,6 +97,31 @@ def _load_validation_symbols(outputs_dir: Path, as_of_date: str, *, limit: int |
         symbols = [str(row.get("symbol", "")).strip() for row in rows if isinstance(row, dict) and row.get("symbol")]
         if limit is not None and limit > 0:
             symbols = symbols[:limit]
-        return symbols
-    return []
+        break
+    return _dedupe([*symbols, *_load_list_symbols(outputs_dir, as_of_date)])
+
+
+def _load_list_symbols(outputs_dir: Path, as_of_date: str) -> list[str]:
+    list_dir = outputs_dir / "lists"
+    if not list_dir.exists():
+        return []
+    symbols: list[str] = []
+    for path in list_dir.glob(f"*_{as_of_date}.json"):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        list_payloads = payload.get("lists", []) if isinstance(payload, dict) and path.name.startswith("multi_lists_") else [payload]
+        for list_payload in list_payloads:
+            items = list_payload.get("items", []) if isinstance(list_payload, dict) else []
+            for item in items if isinstance(items, list) else []:
+                if isinstance(item, dict) and item.get("symbol"):
+                    symbols.append(str(item["symbol"]).strip())
+    return symbols
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
 

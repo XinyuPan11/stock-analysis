@@ -112,13 +112,17 @@ def load_cached_benchmark_history(
 ) -> tuple[pd.DataFrame, str, str]:
     """Read a cached benchmark using known aliases. This never fetches data."""
 
-    aliases = benchmark_aliases(benchmark)
+    aliases = _benchmark_lookup_aliases(benchmark)
+    frames_by_alias: dict[str, list[pd.DataFrame]] = {alias: [] for alias in aliases}
     for symbol in aliases:
-        frame = load_cached_price_history(cache_dir, provider=provider, symbol=symbol, dataset="index_daily", adjusted=False)
-        if not frame.empty:
-            return frame, symbol, "ok"
-    return pd.DataFrame(), aliases[0], "benchmark_missing"
-
+        for dataset, adjusted in (("index_daily", False), ("stock_daily", True)):
+            frame = load_cached_price_history(cache_dir, provider=provider, symbol=symbol, dataset=dataset, adjusted=adjusted)
+            if not frame.empty:
+                frames_by_alias[symbol].append(frame)
+    stitched = _stitch_price_frames([frame for frames in frames_by_alias.values() for frame in frames])
+    if not stitched.empty:
+        return stitched, _resolved_benchmark_symbol(frames_by_alias, benchmark), "ok"
+    return pd.DataFrame(), benchmark_aliases(benchmark)[0], "benchmark_missing"
 
 def benchmark_aliases(benchmark: str) -> list[str]:
     value = str(benchmark or "").strip()
@@ -136,6 +140,40 @@ def benchmark_aliases(benchmark: str) -> list[str]:
             result.append(alias)
     return result or [value]
 
+
+
+def _benchmark_lookup_aliases(benchmark: str) -> list[str]:
+    result: list[str] = []
+    for alias in [str(benchmark or "").strip(), *benchmark_aliases(benchmark)]:
+        if alias and alias not in result:
+            result.append(alias)
+    return result or [str(benchmark or "").strip()]
+
+
+def _stitch_price_frames(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    valid = [frame for frame in frames if frame is not None and not frame.empty]
+    if not valid:
+        return pd.DataFrame()
+    combined = pd.concat(valid, ignore_index=True)
+    if "trade_date" not in combined.columns:
+        return pd.DataFrame()
+    return combined.sort_values("trade_date").drop_duplicates("trade_date", keep="last").reset_index(drop=True)
+
+
+def _resolved_benchmark_symbol(frames_by_alias: dict[str, list[pd.DataFrame]], benchmark: str) -> str:
+    value = str(benchmark or "").strip()
+    if frames_by_alias.get(value):
+        non_input_aliases = [alias for alias in benchmark_aliases(benchmark) if alias != value]
+        if any(frames_by_alias.get(alias) for alias in non_input_aliases):
+            return next(alias for alias in non_input_aliases if frames_by_alias.get(alias))
+        return value
+    for alias in benchmark_aliases(benchmark):
+        if frames_by_alias.get(alias):
+            return alias
+    for alias, frames in frames_by_alias.items():
+        if frames:
+            return alias
+    return value
 
 def cached_price_path(
     cache_dir: str | Path,
@@ -225,3 +263,4 @@ def _safe_float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+

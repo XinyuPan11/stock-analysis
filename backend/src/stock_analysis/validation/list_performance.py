@@ -50,18 +50,18 @@ def evaluate_list_performance(
     if not symbols:
         return {**base, "notes": ["empty_list"]}
     if labels.empty or "symbol" not in labels.columns:
-        return {**base, "notes": ["missing_future_labels"]}
+        return {**base, "notes": ["missing_future_labels", *_coverage_notes(0, len(symbols))]}
 
     rows = labels[labels["symbol"].astype(str).isin(symbols)].copy()
     if "data_quality" not in rows.columns:
-        return {**base, "notes": ["missing_data_quality"]}
+        return {**base, "notes": ["missing_data_quality", *_coverage_notes(0, len(symbols))]}
     valid = rows[rows["data_quality"] == "ok"].copy()
     for column in ["future_return", "future_excess_return", "max_drawdown_during_holding"]:
         if column in valid.columns:
             valid[column] = pd.to_numeric(valid[column], errors="coerce")
     valid = valid.dropna(subset=["future_return"])
     if valid.empty:
-        return {**base, "notes": ["no_valid_future_labels"]}
+        return {**base, "notes": ["no_valid_future_labels", *_coverage_notes(0, len(symbols))]}
 
     returns = valid["future_return"]
     excess = valid["future_excess_return"] if "future_excess_return" in valid.columns else pd.Series(dtype=float)
@@ -80,7 +80,7 @@ def evaluate_list_performance(
         "max_drawdown_average": _mean_or_none(drawdown),
         "best_cases": _case_rows(valid.sort_values("future_return", ascending=False).head(5)),
         "worst_cases": _case_rows(valid.sort_values("future_return", ascending=True).head(5)),
-        "notes": [],
+        "notes": _coverage_notes(len(valid), len(symbols)),
     }
 
 
@@ -115,6 +115,12 @@ def _outperform_rate(frame: pd.DataFrame) -> float | None:
     return float(valid.astype(bool).mean())
 
 
+
+def _coverage_notes(valid_future_count: int, item_count: int) -> list[str]:
+    if item_count > 0 and valid_future_count / item_count < 0.8:
+        return ["low_list_future_coverage"]
+    return []
+
 def _mean_or_none(series: pd.Series) -> float | None:
     numeric = pd.to_numeric(series, errors="coerce").dropna()
     if numeric.empty:
@@ -142,3 +148,5 @@ def _to_frame(value: pd.DataFrame | Iterable[dict[str, object]]) -> pd.DataFrame
     if isinstance(value, pd.DataFrame):
         return value.copy()
     return pd.DataFrame(list(value))
+
+

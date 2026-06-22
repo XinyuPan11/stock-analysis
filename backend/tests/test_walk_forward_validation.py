@@ -190,6 +190,68 @@ class WalkForwardValidationTests(unittest.TestCase):
             self.assertIsNotNone(labels["AAA"]["future_excess_return"])
 
 
+    def test_csi300_alias_stitches_benchmark_for_list_and_factor_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_fixture(root)
+            cache = root / "cache"
+            (cache / "baostock" / "index_daily" / "raw" / "CSI300.csv").unlink()
+            _write_price(cache / "baostock" / "index_daily" / "raw" / "CSI300.csv", "CSI300", [("2024-01-31", 1000)])
+            _write_price(cache / "baostock" / "stock_daily" / "adjusted" / "sh.000300.csv", "sh.000300", [("2024-02-01", 1020)])
+
+            result = run_walk_forward_validation(
+                WalkForwardConfig(
+                    as_of_date="2024-01-31",
+                    horizon_days=1,
+                    outputs_dir=root / "outputs",
+                    cache_dir=cache,
+                    benchmark="CSI300",
+                    list_ids=("trend_leaders",),
+                    limit=2,
+                    dry_run=True,
+                )
+            )
+
+            self.assertEqual(result["summary"]["benchmark_symbol"], "sh.000300")
+            self.assertEqual(result["summary"]["benchmark_data_quality"], "ok")
+            self.assertTrue(result["summary"]["no_future_leakage"])
+            labels = {row["symbol"]: row for row in result["future_labels"]}
+            self.assertAlmostEqual(labels["AAA"]["future_excess_return"], 0.08)
+            self.assertEqual(labels["AAA"]["outperformed_benchmark"], True)
+            self.assertIsNotNone(result["list_performance"][0]["average_excess_return"])
+            self.assertEqual(result["list_performance"][0]["outperform_rate"], 0.5)
+            total_score = next(row for row in result["factor_effectiveness"] if row["factor_name"] == "total_score")
+            self.assertEqual(total_score["top_quantile_outperform_rate"], 1.0)
+
+    def test_missing_benchmark_keeps_excess_metrics_null_without_crashing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_fixture(root)
+            benchmark_path = root / "cache" / "baostock" / "index_daily" / "raw" / "CSI300.csv"
+            benchmark_path.unlink()
+
+            result = run_walk_forward_validation(
+                WalkForwardConfig(
+                    as_of_date="2024-01-31",
+                    horizon_days=1,
+                    outputs_dir=root / "outputs",
+                    cache_dir=root / "cache",
+                    benchmark="CSI300",
+                    list_ids=("trend_leaders",),
+                    limit=2,
+                    dry_run=True,
+                )
+            )
+
+            self.assertTrue(result["summary"]["no_future_leakage"])
+            self.assertEqual(result["summary"]["benchmark_data_quality"], "benchmark_missing")
+            labels = {row["symbol"]: row for row in result["future_labels"]}
+            self.assertIsNone(labels["AAA"]["future_excess_return"])
+            self.assertIsNone(result["list_performance"][0]["average_excess_return"])
+            self.assertIsNone(result["list_performance"][0]["outperform_rate"])
+            total_score = next(row for row in result["factor_effectiveness"] if row["factor_name"] == "total_score")
+            self.assertIsNone(total_score["top_quantile_outperform_rate"])
+
 def _write_fixture(root: Path, *, benchmark_symbol: str = "CSI300") -> None:
     outputs = root / "outputs"
     cache = root / "cache"
@@ -241,3 +303,4 @@ def _write_json(path: Path, payload: object) -> None:
 
 if __name__ == "__main__":
     unittest.main()
+
