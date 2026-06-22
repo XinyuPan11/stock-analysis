@@ -34,6 +34,29 @@ class ValidationCachePlanTests(unittest.TestCase):
         self.assertIn("sh.000300", plan["symbols_to_prewarm"])
         self.assertEqual(plan["missing_future_count"], 2)
 
+    def test_cache_plan_includes_list_item_symbols(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_fixture(root)
+            outputs = root / "outputs"
+            (outputs / "lists").mkdir(parents=True)
+            _write_json(
+                outputs / "lists" / "trend_leaders_2024-01-31.json",
+                {"list_id": "trend_leaders", "as_of_date": "2024-01-31", "items": [{"symbol": "CCC"}]},
+            )
+
+            plan = build_validation_cache_plan(
+                as_of_date="2024-01-31",
+                horizon_days=1,
+                outputs_dir=outputs,
+                cache_dir=root / "cache",
+                benchmark="CSI300",
+                limit=1,
+            )
+
+        self.assertIn("CCC", plan["symbols_to_prewarm"])
+        self.assertFalse(plan["provider_access"])
+
     def test_cache_plan_cli_does_not_access_provider(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -101,3 +124,4 @@ def _write_json(path: Path, payload: object) -> None:
 
 if __name__ == "__main__":
     unittest.main()
+

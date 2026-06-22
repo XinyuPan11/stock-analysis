@@ -36,7 +36,8 @@ def run_walk_forward_validation(config: WalkForwardConfig) -> dict[str, object]:
     outputs_dir = Path(config.outputs_dir)
     labels = _load_label_rows(outputs_dir, config.as_of_date)
     labels = _limit_rows(labels, config.limit)
-    symbols = labels["symbol"].dropna().astype(str).tolist() if "symbol" in labels.columns else []
+    list_payloads = _load_list_payloads(outputs_dir, config.as_of_date, config.list_ids)
+    symbols = _dedupe([*_label_symbols(labels), *_list_payload_symbols(list_payloads)])
     benchmark_history, benchmark_symbol, benchmark_quality = load_cached_benchmark_history(
         config.cache_dir,
         provider=config.provider,
@@ -54,7 +55,6 @@ def run_walk_forward_validation(config: WalkForwardConfig) -> dict[str, object]:
         benchmark_history=benchmark_history,
     )
     future_frame = pd.DataFrame(future_labels)
-    list_payloads = _load_list_payloads(outputs_dir, config.as_of_date, config.list_ids)
     list_performance = evaluate_lists_performance(list_payloads, future_frame, horizon_days=config.horizon_days)
     factor_rows = load_factor_rows_for_validation(outputs_dir, config.as_of_date, labels)
     factor_effectiveness = evaluate_factor_effectiveness(
@@ -147,6 +147,31 @@ def _load_list_payloads(outputs_dir: Path, as_of_date: str, list_ids: Iterable[s
             result.append({"list_id": list_id, "as_of_date": as_of_date, "items": [], "notes": ["missing_list_file"]})
     return result
 
+
+
+def _label_symbols(labels: pd.DataFrame) -> list[str]:
+    if labels.empty or "symbol" not in labels.columns:
+        return []
+    return [str(symbol).strip() for symbol in labels["symbol"].dropna().tolist() if str(symbol).strip()]
+
+
+def _list_payload_symbols(list_payloads: Iterable[dict[str, object]]) -> list[str]:
+    result: list[str] = []
+    for payload in list_payloads:
+        items = payload.get("items", []) if isinstance(payload, dict) else []
+        for item in items if isinstance(items, list) else []:
+            if isinstance(item, dict) and item.get("symbol"):
+                result.append(str(item["symbol"]).strip())
+    return result
+
+
+def _dedupe(values: Iterable[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
 
 def load_factor_rows_for_validation(outputs_dir: str | Path, as_of_date: str, labels: pd.DataFrame | None = None) -> pd.DataFrame:
     outputs_path = Path(outputs_dir)
@@ -300,3 +325,4 @@ def _markdown_report(result: dict[str, object]) -> str:
             f"- Valid future labels: {summary.get('valid_future_count')}",
         ]
     )
+

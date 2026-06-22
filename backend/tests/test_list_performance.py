@@ -28,6 +28,25 @@ class ListPerformanceTests(unittest.TestCase):
         self.assertAlmostEqual(result["outperform_rate"], 0.5)
         self.assertEqual(result["notes"], [])
 
+    def test_low_valid_future_coverage_adds_warning(self) -> None:
+        payload = {
+            "list_id": "trend_leaders",
+            "as_of_date": "2024-01-31",
+            "items": [{"symbol": symbol} for symbol in ["AAA", "BBB", "CCC", "DDD", "EEE"]],
+        }
+        labels = pd.DataFrame(
+            [
+                {"symbol": "AAA", "future_return": 0.10, "future_excess_return": 0.08, "outperformed_benchmark": True, "data_quality": "ok"},
+                {"symbol": "BBB", "future_return": 0.02, "future_excess_return": 0.00, "outperformed_benchmark": False, "data_quality": "ok"},
+                {"symbol": "CCC", "future_return": -0.01, "future_excess_return": -0.03, "outperformed_benchmark": False, "data_quality": "ok"},
+            ]
+        )
+
+        result = evaluate_list_performance(payload, labels, horizon_days=20)
+
+        self.assertEqual(result["valid_future_count"], 3)
+        self.assertIn("low_list_future_coverage", result["notes"])
+
     def test_empty_list_returns_note_without_error(self) -> None:
         result = evaluate_list_performance({"list_id": "rebound_watch", "as_of_date": "2024-01-31", "items": []}, [], horizon_days=20)
 
@@ -37,4 +56,5 @@ class ListPerformanceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
