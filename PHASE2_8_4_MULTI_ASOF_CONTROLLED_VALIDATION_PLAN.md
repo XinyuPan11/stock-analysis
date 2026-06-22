@@ -36,7 +36,13 @@ For each as-of date, features, lists, filters, and dynamic states must use only 
 
 Future returns, future drawdowns, and benchmark outcomes are labels/evaluation metrics only.
 
-Do not tune filters on one as-of date and report the same date as validated. Same-period findings remain research-only until they are checked on separate as-of dates.`r`n`r`nAny horizon window that requires 2025 future data is listed as deferred. Phase 2.8.4 does not generate prewarm or validation commands for 2025 windows.
+Do not tune filters on one as-of date and report the same date as validated. Same-period findings remain research-only until they are checked on separate as-of dates.
+
+Future window target end dates reuse the existing validation cache plan logic in backend/src/stock_analysis/validation/cache_plan.py. The planner does not use a simple calendar-day horizon as the cache end date.
+
+If required as-of labels, factor rows, or list outputs are missing, cache requirements are marked blocked_missing_as_of_outputs. A zero symbol_count in that state is blocked, not cache-complete.
+
+Any horizon window that requires 2025 future data is listed as deferred. Phase 2.8.4 does not generate prewarm or validation commands for 2025 windows.
 
 ## Planned Comparisons
 
@@ -97,4 +103,5 @@ python backend\scripts\generate_multi_asof_validation_plan.py --outputs-dir outp
 - Requires user-controlled cache prewarm for missing windows.
 - Requires per-as-of list/label outputs before full comparison.
 - No 2025 validation yet.
+
 

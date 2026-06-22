@@ -8,6 +8,7 @@ from typing import Iterable
 
 import pandas as pd
 
+from stock_analysis.validation.cache_plan import recommended_target_end_date
 from stock_analysis.validation.walk_forward import sanitize_for_json
 
 
@@ -42,23 +43,35 @@ def build_multi_asof_validation_plan(config: MultiAsOfValidationConfig) -> dict[
     cache_requirements = []
     for as_of_date in config.as_of_dates:
         entries = []
+        as_of_outputs = _as_of_required_outputs(outputs_dir, as_of_date)
+        missing_as_of_outputs = _missing_as_of_outputs(as_of_outputs)
         for horizon in config.horizons:
             window = future_window_for(as_of_date, horizon)
             crosses_year_boundary = window["end_date"] > f"{MULTI_ASOF_YEAR}-12-31"
             status = _output_status(outputs_dir, as_of_date, horizon)
-            cache_status = _cache_requirement(cache_dir, config.provider, outputs_dir, as_of_date, horizon, window, config.recommended_limit)
+            cache_status = _cache_requirement(
+                cache_dir,
+                config.provider,
+                outputs_dir,
+                as_of_date,
+                horizon,
+                window,
+                config.recommended_limit,
+                missing_as_of_outputs,
+            )
             entries.append(
                 {
                     "horizon_days": horizon,
                     "future_window": window,
                     "crosses_2025_boundary": crosses_year_boundary,
                     "deferred_until_2025_allowed": crosses_year_boundary,
+                    "missing_as_of_outputs": missing_as_of_outputs,
                     "required_outputs": status["required_outputs"],
                     "existing_outputs": status["existing_outputs"],
                     "missing_outputs": status["missing_outputs"],
-                    "ready_for_comparison": (not status["missing_outputs"]) and not crosses_year_boundary,
+                    "ready_for_comparison": (not status["missing_outputs"]) and (not missing_as_of_outputs) and not crosses_year_boundary,
                     "cache_requirement_id": cache_status["cache_requirement_id"],
-                    "manual_validation_commands": _manual_validation_commands(config, as_of_date, horizon, crosses_year_boundary),
+                    "manual_validation_commands": _manual_validation_commands(config, as_of_date, horizon, crosses_year_boundary, missing_as_of_outputs),
                 }
             )
             cache_requirements.append(cache_status)
@@ -67,7 +80,7 @@ def build_multi_asof_validation_plan(config: MultiAsOfValidationConfig) -> dict[
                 "as_of_date": as_of_date,
                 "feature_data_rule": "Use only features, lists, filters, and dynamic states available on or before this as-of date.",
                 "horizons": entries,
-                "required_as_of_outputs": _as_of_required_outputs(outputs_dir, as_of_date),
+                "required_as_of_outputs": as_of_outputs,
             }
         )
     return {
@@ -128,6 +141,7 @@ def write_multi_asof_outputs(plan: dict[str, object], outputs_dir: str | Path) -
 
 
 def markdown_multi_asof_summary(plan: dict[str, object]) -> str:
+    ready_rows, missing_experiment_rows, blocked_rows, deferred_rows = _readiness_rows(plan)
     lines = [
         "# Phase 2.8.4 Multi-As-Of Controlled Validation Plan",
         "",
@@ -141,14 +155,32 @@ def markdown_multi_asof_summary(plan: dict[str, object]) -> str:
         f"- Provider access: {plan.get('provider_access')}",
         f"- Full workflow executed: {plan.get('full_workflow_executed')}",
         "",
-        "## Required Outputs By As-Of",
+        "## Validation Readiness",
+        "",
+        "### Ready validations",
         "",
     ]
+    lines.extend(_table(ready_rows, ["as_of_date", "horizon_days", "cache_status", "missing_outputs"]))
+    lines.extend(["", "### Missing experiment outputs only", ""])
+    lines.extend(_table(missing_experiment_rows, ["as_of_date", "horizon_days", "cache_status", "missing_outputs"]))
+    lines.extend(
+        [
+            "",
+            "### Blocked because as-of outputs are missing",
+            "",
+            "Generate as-of labels, factor rows, and list outputs first. Rows with symbol_count=0 in this section are blocked, not cache-complete.",
+            "",
+        ]
+    )
+    lines.extend(_table(blocked_rows, ["as_of_date", "horizon_days", "cache_status", "missing_as_of_outputs"]))
+    lines.extend(["", "### Deferred because crosses 2025", ""])
+    lines.extend(_table(deferred_rows, ["as_of_date", "horizon_days", "cache_status", "future_window"]))
+    lines.extend(["", "## Required Outputs By As-Of", ""])
     for as_of in plan.get("as_of_plan", []):
         if not isinstance(as_of, dict):
             continue
         lines.extend([f"### {as_of.get('as_of_date')}", ""])
-        lines.extend(_table(as_of.get("horizons", []), ["horizon_days", "ready_for_comparison", "missing_outputs", "cache_requirement_id"]))
+        lines.extend(_table(as_of.get("horizons", []), ["horizon_days", "ready_for_comparison", "missing_as_of_outputs", "missing_outputs", "cache_requirement_id"]))
         lines.append("")
     lines.extend(
         [
@@ -165,17 +197,19 @@ def markdown_multi_asof_summary(plan: dict[str, object]) -> str:
             [
                 f"### {requirement.get('cache_requirement_id')}",
                 "",
+                f"Status: {requirement.get('status')}",
+                "",
                 "Cache coverage check:",
                 "",
-                "```powershell",
+                "~~~powershell",
                 str(requirement.get("manual_cache_coverage_command", "")),
-                "```",
+                "~~~",
                 "",
                 "Manual prewarm, only if the user chooses to fetch missing cache:",
                 "",
-                "```powershell",
+                "~~~powershell",
                 str(requirement.get("manual_prewarm_command", "")),
-                "```",
+                "~~~",
                 "",
             ]
         )
@@ -183,8 +217,8 @@ def markdown_multi_asof_summary(plan: dict[str, object]) -> str:
         [
             "## Dynamic State History",
             "",
-            "- Track `eligible`, `watch_only`, `blocked_now`, `cooldown`, and `re_entry_candidate` across as-of dates.",
-            "- `cooldown` and `re_entry_candidate` require previous as-of state history before full dynamic add/reduce/exit logic.",
+            "- Track eligible, watch_only, blocked_now, cooldown, and re_entry_candidate across as-of dates.",
+            "- cooldown and re_entry_candidate require previous as-of state history before full dynamic add/reduce/exit logic.",
             "",
             "## Non-goals",
             "",
@@ -200,8 +234,11 @@ def markdown_multi_asof_summary(plan: dict[str, object]) -> str:
 
 def future_window_for(as_of_date: str, horizon_days: int) -> dict[str, str]:
     start = date.fromisoformat(as_of_date) + timedelta(days=1)
-    end = date.fromisoformat(as_of_date) + timedelta(days=horizon_days)
-    return {"start_date": start.isoformat(), "end_date": end.isoformat()}
+    return {
+        "start_date": start.isoformat(),
+        "end_date": recommended_target_end_date(as_of_date, horizon_days),
+        "target_end_date_source": "validation.cache_plan.recommended_target_end_date",
+    }
 
 
 def _output_status(outputs_dir: Path, as_of_date: str, horizon: int) -> dict[str, object]:
@@ -227,9 +264,14 @@ def _as_of_required_outputs(outputs_dir: Path, as_of_date: str) -> dict[str, obj
         "factor_rows_csv": outputs_dir / "daily" / f"factors_{as_of_date}.csv",
         "high_confidence_list": outputs_dir / "lists" / f"high_confidence_candidates_{as_of_date}.json",
     }
+    return {key: {"path": str(path), "exists": path.exists()} for key, path in required.items()}
+
+
+def _missing_as_of_outputs(required_outputs: dict[str, object]) -> dict[str, object]:
     return {
-        key: {"path": str(path), "exists": path.exists()}
-        for key, path in required.items()
+        key: value
+        for key, value in required_outputs.items()
+        if isinstance(value, dict) and not value.get("exists")
     }
 
 
@@ -241,17 +283,38 @@ def _cache_requirement(
     horizon: int,
     window: dict[str, str],
     recommended_limit: int,
+    missing_as_of_outputs: dict[str, object],
 ) -> dict[str, object]:
+    requirement_id = f"{as_of_date}_{horizon}d"
+    crosses_year_boundary = window["end_date"] > f"{MULTI_ASOF_YEAR}-12-31"
+    if missing_as_of_outputs:
+        return {
+            "cache_requirement_id": requirement_id,
+            "as_of_date": as_of_date,
+            "horizon_days": horizon,
+            "status": "blocked_missing_as_of_outputs",
+            "future_window": window,
+            "crosses_2025_boundary": crosses_year_boundary,
+            "deferred_until_2025_allowed": crosses_year_boundary,
+            "missing_as_of_outputs": missing_as_of_outputs,
+            "symbol_count": 0,
+            "covered_count": 0,
+            "missing_count": 0,
+            "missing_symbols": [],
+            "provider_access": False,
+            "manual_cache_coverage_command": "unavailable_missing_as_of_outputs",
+            "manual_prewarm_command": "unavailable_missing_as_of_outputs",
+            "notes": ["generate_as_of_labels_lists_first"],
+        }
     symbols = _load_symbols_for_as_of(outputs_dir, as_of_date, recommended_limit)
     rows = [_coverage_status(cache_dir, provider=provider, symbol=symbol, start_date=window["start_date"], end_date=window["end_date"]) for symbol in symbols]
     covered_count = sum(1 for row in rows if row["covered"])
     missing_symbols = [row["symbol"] for row in rows if not row["covered"]]
-    requirement_id = f"{as_of_date}_{horizon}d"
-    crosses_year_boundary = window["end_date"] > f"{MULTI_ASOF_YEAR}-12-31"
     return {
         "cache_requirement_id": requirement_id,
         "as_of_date": as_of_date,
         "horizon_days": horizon,
+        "status": "deferred_2025_boundary" if crosses_year_boundary else "evaluated",
         "future_window": window,
         "crosses_2025_boundary": crosses_year_boundary,
         "deferred_until_2025_allowed": crosses_year_boundary,
@@ -265,9 +328,17 @@ def _cache_requirement(
     }
 
 
-def _manual_validation_commands(config: MultiAsOfValidationConfig, as_of_date: str, horizon: int, crosses_year_boundary: bool) -> dict[str, str]:
+def _manual_validation_commands(
+    config: MultiAsOfValidationConfig,
+    as_of_date: str,
+    horizon: int,
+    crosses_year_boundary: bool,
+    missing_as_of_outputs: dict[str, object],
+) -> dict[str, str]:
     if crosses_year_boundary:
         return {"strategy_family": "not_generated_2025_boundary", "aggressive_filter": "not_generated_2025_boundary"}
+    if missing_as_of_outputs:
+        return {"strategy_family": "unavailable_missing_as_of_outputs", "aggressive_filter": "unavailable_missing_as_of_outputs"}
     strategy = (
         "python backend\\scripts\\run_strategy_family_experiments.py "
         f"--as-of-date {as_of_date} --horizon-days {horizon} --outputs-dir outputs --cache-dir {config.cache_dir} --write-output"
@@ -333,6 +404,43 @@ def _coverage_status(cache_dir: Path, *, provider: str, symbol: str, start_date:
         "path": str(path),
         "window_row_count": int(len(window_rows)),
     }
+
+
+def _readiness_rows(plan: dict[str, object]) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    requirement_by_id = {
+        requirement.get("cache_requirement_id"): requirement
+        for requirement in plan.get("cache_requirements", [])
+        if isinstance(requirement, dict)
+    }
+    ready_rows: list[dict[str, object]] = []
+    missing_experiment_rows: list[dict[str, object]] = []
+    blocked_rows: list[dict[str, object]] = []
+    deferred_rows: list[dict[str, object]] = []
+    for as_of in plan.get("as_of_plan", []):
+        if not isinstance(as_of, dict):
+            continue
+        as_of_date = str(as_of.get("as_of_date", ""))
+        for horizon in as_of.get("horizons", []):
+            if not isinstance(horizon, dict):
+                continue
+            requirement = requirement_by_id.get(horizon.get("cache_requirement_id"), {})
+            row = {
+                "as_of_date": as_of_date,
+                "horizon_days": horizon.get("horizon_days"),
+                "future_window": horizon.get("future_window"),
+                "cache_status": requirement.get("status"),
+                "missing_outputs": horizon.get("missing_outputs"),
+                "missing_as_of_outputs": horizon.get("missing_as_of_outputs"),
+            }
+            if horizon.get("crosses_2025_boundary"):
+                deferred_rows.append(row)
+            elif horizon.get("missing_as_of_outputs"):
+                blocked_rows.append(row)
+            elif horizon.get("missing_outputs"):
+                missing_experiment_rows.append(row)
+            else:
+                ready_rows.append(row)
+    return ready_rows, missing_experiment_rows, blocked_rows, deferred_rows
 
 
 def _table(rows: object, columns: list[str]) -> list[str]:

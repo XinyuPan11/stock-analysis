@@ -11,6 +11,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from stock_analysis.validation.cache_plan import recommended_target_end_date
 from stock_analysis.validation.multi_asof_validation import (
     DEFAULT_AS_OF_DATES,
     DEFAULT_HORIZONS,
@@ -35,9 +36,13 @@ class MultiAsOfValidationTests(unittest.TestCase):
         self.assertIn("right_tail_preservation_ratio", plan["comparison_metrics"])
         self.assertIn("cooldown", plan["dynamic_state_history_plan"]["states"])
 
-    def test_future_windows_are_forward_only_from_as_of_date(self) -> None:
-        self.assertEqual(future_window_for("2024-04-30", 20), {"start_date": "2024-05-01", "end_date": "2024-05-20"})
-        self.assertEqual(future_window_for("2024-10-31", 120), {"start_date": "2024-11-01", "end_date": "2025-02-28"})
+    def test_future_windows_use_validation_cache_plan_target_end_date(self) -> None:
+        window = future_window_for("2024-01-31", 120)
+
+        self.assertEqual(window["start_date"], "2024-02-01")
+        self.assertEqual(window["end_date"], recommended_target_end_date("2024-01-31", 120))
+        self.assertEqual(window["end_date"], "2024-09-27")
+        self.assertEqual(window["target_end_date_source"], "validation.cache_plan.recommended_target_end_date")
 
     def test_plan_defers_windows_that_require_2025_data(self) -> None:
         plan = build_multi_asof_validation_plan(
@@ -50,15 +55,35 @@ class MultiAsOfValidationTests(unittest.TestCase):
         self.assertTrue(horizon["deferred_until_2025_allowed"])
         self.assertFalse(horizon["ready_for_comparison"])
         self.assertEqual(horizon["manual_validation_commands"]["strategy_family"], "not_generated_2025_boundary")
-        self.assertEqual(requirement["manual_prewarm_command"], "not_generated_2025_boundary")
-        self.assertEqual(requirement["manual_cache_coverage_command"], "not_generated_2025_boundary")
+        self.assertIn(requirement["manual_prewarm_command"], {"not_generated_2025_boundary", "unavailable_missing_as_of_outputs"})
+        self.assertIn(requirement["manual_cache_coverage_command"], {"not_generated_2025_boundary", "unavailable_missing_as_of_outputs"})
+
+    def test_missing_as_of_outputs_block_cache_requirement(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plan = build_multi_asof_validation_plan(
+                MultiAsOfValidationConfig(outputs_dir=root / "outputs", cache_dir=root / "cache", as_of_dates=("2024-04-30",), horizons=(20,))
+            )
+
+            horizon = plan["as_of_plan"][0]["horizons"][0]
+            requirement = plan["cache_requirements"][0]
+            self.assertFalse(horizon["ready_for_comparison"])
+            self.assertIn("stock_labels", horizon["missing_as_of_outputs"])
+            self.assertEqual(requirement["status"], "blocked_missing_as_of_outputs")
+            self.assertEqual(requirement["symbol_count"], 0)
+            self.assertEqual(requirement["covered_count"], 0)
+            self.assertEqual(requirement["missing_count"], 0)
+            self.assertEqual(requirement["manual_prewarm_command"], "unavailable_missing_as_of_outputs")
+            self.assertEqual(requirement["manual_cache_coverage_command"], "unavailable_missing_as_of_outputs")
+            self.assertIn("generate_as_of_labels_lists_first", requirement["notes"])
+
     def test_plan_checks_existing_outputs_and_cache_without_provider_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             outputs = root / "outputs"
             cache = root / "cache"
             _write_as_of_outputs(outputs, "2024-01-31", 20)
-            _write_labels(outputs, "2024-01-31", ["AAA", "BBB"])
+            _write_required_as_of_outputs(outputs, "2024-01-31", ["AAA", "BBB"])
             _write_price(cache / "baostock" / "stock_daily" / "adjusted" / "AAA.csv", "AAA", [("2024-02-01", 10.0)])
 
             plan = build_multi_asof_validation_plan(
@@ -75,6 +100,8 @@ class MultiAsOfValidationTests(unittest.TestCase):
             cache_requirement = plan["cache_requirements"][0]
             self.assertTrue(horizon["ready_for_comparison"])
             self.assertEqual(horizon["missing_outputs"], {})
+            self.assertEqual(horizon["missing_as_of_outputs"], {})
+            self.assertEqual(cache_requirement["status"], "evaluated")
             self.assertEqual(cache_requirement["symbol_count"], 2)
             self.assertEqual(cache_requirement["covered_count"], 1)
             self.assertEqual(cache_requirement["missing_symbols"], ["BBB"])
@@ -100,6 +127,11 @@ class MultiAsOfValidationTests(unittest.TestCase):
             self.assertEqual(summary_path.name, "multi_asof_validation_summary_2024.md")
             markdown = summary_path.read_text(encoding="utf-8")
             self.assertIn("Anti-leakage", markdown)
+            self.assertIn("Ready validations", markdown)
+            self.assertIn("Missing experiment outputs only", markdown)
+            self.assertIn("Blocked because as-of outputs are missing", markdown)
+            self.assertIn("Deferred because crosses 2025", markdown)
+            self.assertIn("generate as-of labels", markdown.lower())
             self.assertIn("Do not access BaoStock automatically", markdown)
             self.assertIn("cooldown", markdown)
 
@@ -150,6 +182,16 @@ def _write_as_of_outputs(outputs: Path, as_of_date: str, horizon: int) -> None:
         outputs / "experiments" / f"aggressive_filter_experiments_{suffix}.json",
     ]:
         path.write_text("[]", encoding="utf-8")
+
+
+def _write_required_as_of_outputs(outputs: Path, as_of_date: str, symbols: list[str]) -> None:
+    _write_labels(outputs, as_of_date, symbols)
+    factors = outputs / "daily" / f"factors_{as_of_date}.csv"
+    factors.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"symbol": symbol, "total_score": 1.0} for symbol in symbols]).to_csv(factors, index=False, encoding="utf-8")
+    list_path = outputs / "lists" / f"high_confidence_candidates_{as_of_date}.json"
+    list_path.parent.mkdir(parents=True, exist_ok=True)
+    list_path.write_text(json.dumps({"items": [{"symbol": symbol} for symbol in symbols]}), encoding="utf-8")
 
 
 def _write_labels(outputs: Path, as_of_date: str, symbols: list[str]) -> None:
