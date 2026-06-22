@@ -13,7 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from stock_analysis.research.aggressive_filter_profiles import FORBIDDEN_FEATURE_COLUMNS, all_filter_feature_columns
 from stock_analysis.validation.aggressive_filter_experiment import (
     AggressiveFilterExperimentConfig,
+    STATE_FEATURE_COLUMNS,
     apply_aggressive_filter,
+    assign_aggressive_dynamic_states,
     render_aggressive_filter_experiment_report,
     run_aggressive_filter_experiments,
 )
@@ -22,6 +24,7 @@ from stock_analysis.validation.aggressive_filter_experiment import (
 class AggressiveFilterExperimentTests(unittest.TestCase):
     def test_filter_profiles_do_not_use_future_label_columns(self) -> None:
         self.assertFalse(all_filter_feature_columns() & FORBIDDEN_FEATURE_COLUMNS)
+        self.assertFalse(STATE_FEATURE_COLUMNS & FORBIDDEN_FEATURE_COLUMNS)
 
     def test_filters_only_consume_as_of_feature_columns(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -109,6 +112,91 @@ class AggressiveFilterExperimentTests(unittest.TestCase):
             self.assertIn("missing_feature:recent_extreme_move_proxy", row["notes"])
             self.assertIn("missing_feature:amount_abnormality", row["notes"])
 
+    def test_dynamic_state_assignment_uses_only_as_of_feature_columns(self) -> None:
+        profile = _first_non_baseline_filter()
+        features_a = pd.DataFrame(
+            [
+                {"symbol": "AAA", "volatility": 0.03, "future_return": -0.90},
+                {"symbol": "BBB", "volatility": 0.10, "future_return": 0.90},
+            ]
+        )
+        features_b = features_a.copy()
+        features_b["future_return"] = [0.90, -0.90]
+
+        states_a = assign_aggressive_dynamic_states(
+            ["AAA", "BBB"],
+            features_a,
+            profile,
+            source_strategy_family="momentum_breakout",
+            as_of_date="2024-01-31",
+        )
+        states_b = assign_aggressive_dynamic_states(
+            ["AAA", "BBB"],
+            features_b,
+            profile,
+            source_strategy_family="momentum_breakout",
+            as_of_date="2024-01-31",
+        )
+
+        self.assertEqual(states_a, states_b)
+        self.assertNotIn("future_return", STATE_FEATURE_COLUMNS)
+
+    def test_failed_filter_is_temporary_not_permanent_exclusion(self) -> None:
+        profile = _first_non_baseline_filter()
+        states = assign_aggressive_dynamic_states(
+            ["DDD"],
+            pd.DataFrame([{"symbol": "DDD", "volatility": 0.10, "drawdown": -0.50}]),
+            profile,
+            source_strategy_family="momentum_breakout",
+            as_of_date="2024-01-31",
+            filtered_symbols=[],
+        )
+
+        self.assertEqual(states[0]["aggressive_state"], "blocked_now")
+        self.assertIn("not a permanent exclusion", states[0]["state_reason"])
+
+    def test_cooldown_and_re_entry_are_not_faked_without_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            write_aggressive_filter_fixture(root)
+
+            result = run_aggressive_filter_experiments(
+                AggressiveFilterExperimentConfig(
+                    as_of_date="2024-01-31",
+                    horizon_days=120,
+                    outputs_dir=root / "outputs",
+                    source_family_ids=("momentum_breakout",),
+                    filter_ids=("aggressive_volatility_cap",),
+                    dry_run=True,
+                )
+            )
+
+            counts = result["dynamic_state_summary"]["state_counts"]
+            self.assertEqual(counts["cooldown"], 0)
+            self.assertEqual(counts["re_entry_candidate"], 0)
+            self.assertIn("requires prior as-of state history", result["state_limitations"][-1])
+
+    def test_dynamic_state_output_rows_are_included_in_json_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            write_aggressive_filter_fixture(root)
+
+            result = run_aggressive_filter_experiments(
+                AggressiveFilterExperimentConfig(
+                    as_of_date="2024-01-31",
+                    horizon_days=120,
+                    outputs_dir=root / "outputs",
+                    source_family_ids=("momentum_breakout",),
+                    filter_ids=("aggressive_volatility_cap",),
+                    dry_run=True,
+                )
+            )
+
+            state_row = result["dynamic_state_results"][0]
+            self.assertEqual(state_row["as_of_date"], "2024-01-31")
+            self.assertEqual(state_row["source_strategy_family"], "momentum_breakout")
+            self.assertIn(state_row["aggressive_state"], {"eligible", "watch_only", "blocked_now", "cooldown", "re_entry_candidate"})
+            self.assertIn("state_definitions", result)
     def test_report_includes_anti_leakage_disclaimer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -129,6 +217,8 @@ class AggressiveFilterExperimentTests(unittest.TestCase):
             self.assertIn("Anti-leakage statement", report)
             self.assertIn("Research-only experiment", report)
             self.assertIn("does not replace production scoring", report)
+            self.assertIn("does not permanently blacklist stocks", report)
+            self.assertIn("Dynamic aggressive state layer", report)
 
     def test_apply_filter_reports_missing_as_of_features_safely(self) -> None:
         symbols = ["AAA", "BBB"]
@@ -197,4 +287,7 @@ def _write_json(path: Path, payload: object) -> None:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
 

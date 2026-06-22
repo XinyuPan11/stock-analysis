@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import math
@@ -23,6 +23,41 @@ from stock_analysis.validation.strategy_family_experiment import _load_list_payl
 from stock_analysis.validation.walk_forward import load_factor_rows_for_validation, sanitize_for_json
 
 
+AGGRESSIVE_DYNAMIC_STATES = ("eligible", "watch_only", "blocked_now", "cooldown", "re_entry_candidate")
+STATE_FEATURE_COLUMNS = frozenset(
+    {
+        "volatility",
+        "drawdown",
+        "risk_score",
+        "total_score",
+        "momentum_score",
+        "trend_score",
+        "relative_strength_score",
+        "liquidity_score",
+        "amount",
+        "volume",
+        "recent_signal_failure",
+        "recent_breakout_failure",
+    }
+)
+STATE_COOLDOWN_FIELDS = ("recent_signal_failure", "recent_breakout_failure")
+DEFAULT_COOLDOWN_DAYS = 20
+AGGRESSIVE_STATE_DEFINITIONS = {
+    "eligible": "The stock currently passes aggressive opportunity requirements and may enter the aggressive candidate pool.",
+    "watch_only": "The stock has some aggressive or right-tail potential but lacks enough confirmation or still has elevated risk.",
+    "blocked_now": "The stock currently has too much fake-breakout risk, noisy volatility, drawdown damage, weak risk score, or other left-tail risk.",
+    "cooldown": "The stock recently failed an as-of-safe signal-state check and should be temporarily excluded before re-evaluation.",
+    "re_entry_candidate": "The stock had a prior non-eligible state, but current as-of features have improved enough to re-evaluate.",
+}
+STATE_LIMITATIONS = [
+    "A failed aggressive filter is a temporary as-of-date state and does not permanently blacklist stocks.",
+    "All states must be recomputed from as-of data at each observation date.",
+    "Future returns, future drawdowns, and benchmark outcomes are labels/evaluation only and are not state features.",
+    "cooldown requires historical signal-state tracking and is not fully implemented yet.",
+    "re_entry_candidate requires prior as-of state history and will be enabled in a multi-as-of validation phase.",
+]
+
+
 @dataclass(frozen=True)
 class AggressiveFilterExperimentConfig:
     as_of_date: str
@@ -44,6 +79,7 @@ def run_aggressive_filter_experiments(config: AggressiveFilterExperimentConfig) 
     list_payloads = _load_list_payloads(outputs_dir, config.as_of_date, source_profiles)
     baseline_metrics: dict[str, dict[str, object]] = {}
     results: list[dict[str, object]] = []
+    dynamic_state_results: list[dict[str, object]] = []
 
     for source_profile in source_profiles:
         symbols = _symbols_for_profile(source_profile, list_payloads)
@@ -72,7 +108,18 @@ def run_aggressive_filter_experiments(config: AggressiveFilterExperimentConfig) 
             )
             _add_relative_tail_metrics(row, baseline)
             results.append(row)
+            dynamic_state_results.extend(
+                assign_aggressive_dynamic_states(
+                    symbols,
+                    features,
+                    filter_profile,
+                    source_strategy_family=source_profile.profile_id,
+                    as_of_date=config.as_of_date,
+                    filtered_symbols=filtered_symbols,
+                )
+            )
 
+    dynamic_state_summary = summarize_dynamic_state_results(dynamic_state_results)
     context = _load_context(outputs_dir, config.as_of_date, config.horizon_days)
     summary = {
         "status": "dry_run" if config.dry_run else "ok",
@@ -94,18 +141,24 @@ def run_aggressive_filter_experiments(config: AggressiveFilterExperimentConfig) 
         "valid_prediction_count": int(_valid_predictions(predictions).shape[0]) if not predictions.empty else 0,
         "as_of_feature_count": int(len(features)),
         "feature_columns_used": sorted(all_filter_feature_columns(filters)),
+        "dynamic_state_feature_columns": sorted(STATE_FEATURE_COLUMNS),
         "forbidden_feature_columns": sorted(FORBIDDEN_FEATURE_COLUMNS),
         "validation_status_values": sorted({str(row.get("validation_status")) for row in results}),
         "cache_dir": str(config.cache_dir),
         "source_files": context["source_files"],
         "source_notes": context["source_notes"],
         "triple_barrier_note": "Optional path-based triple-barrier labels are supported by helper functions, but not generated without future price paths.",
+        "dynamic_state_summary": dynamic_state_summary,
     }
     result = {
         "summary": summary,
         "source_families": [profile.to_dict() for profile in source_profiles],
         "filters": [profile.to_dict() for profile in filters],
         "aggressive_filter_results": results,
+        "dynamic_state_summary": dynamic_state_summary,
+        "dynamic_state_results": dynamic_state_results,
+        "state_definitions": AGGRESSIVE_STATE_DEFINITIONS,
+        "state_limitations": STATE_LIMITATIONS,
         "source_context": context["source_context"],
         "outputs": {},
     }
@@ -148,6 +201,199 @@ def apply_aggressive_filter(
     return filtered, notes
 
 
+def assign_aggressive_dynamic_states(
+    symbols: Iterable[str],
+    as_of_features: pd.DataFrame,
+    filter_profile: AggressiveFilterProfile,
+    *,
+    source_strategy_family: str,
+    as_of_date: str,
+    filtered_symbols: Iterable[str] | None = None,
+    prior_state_history: dict[str, str] | None = None,
+) -> list[dict[str, object]]:
+    _assert_no_future_state_columns()
+    ordered_symbols = [str(symbol).strip() for symbol in symbols if str(symbol).strip()]
+    if filtered_symbols is None:
+        filtered_symbols, _ = apply_aggressive_filter(ordered_symbols, as_of_features, filter_profile)
+    eligible_symbols = {str(symbol).strip() for symbol in filtered_symbols if str(symbol).strip()}
+    features = _state_feature_frame(as_of_features, ordered_symbols)
+    rows: list[dict[str, object]] = []
+    for symbol in ordered_symbols:
+        feature_row = features.loc[symbol] if symbol in features.index else pd.Series(dtype=object)
+        risk_flags = _state_risk_flags(feature_row, features.columns)
+        state, reason, cooldown_days = _dynamic_state_for_symbol(
+            symbol=symbol,
+            feature_row=feature_row,
+            available_columns=set(features.columns),
+            eligible_symbols=eligible_symbols,
+            risk_flags=risk_flags,
+            prior_state_history=prior_state_history or {},
+        )
+        rows.append(
+            {
+                "symbol": symbol,
+                "as_of_date": as_of_date,
+                "source_strategy_family": source_strategy_family,
+                "filter_id": filter_profile.filter_id,
+                "aggressive_state": state,
+                "state_reason": reason,
+                "risk_flags": risk_flags,
+                "re_entry_conditions": _re_entry_conditions(risk_flags, state),
+                "cooldown_days": cooldown_days,
+                "validation_status": VALIDATION_STATUS_EXPLORATORY,
+            }
+        )
+    return rows
+
+
+def summarize_dynamic_state_results(rows: Iterable[dict[str, object]]) -> dict[str, object]:
+    materialized = list(rows)
+    counts = {state: 0 for state in AGGRESSIVE_DYNAMIC_STATES}
+    for row in materialized:
+        state = str(row.get("aggressive_state") or "")
+        if state in counts:
+            counts[state] += 1
+    grouped: dict[tuple[str, str], dict[str, object]] = {}
+    for row in materialized:
+        key = (str(row.get("source_strategy_family") or ""), str(row.get("filter_id") or ""))
+        bucket = grouped.setdefault(
+            key,
+            {
+                "source_strategy_family": key[0],
+                "filter_id": key[1],
+                **{f"{state}_count": 0 for state in AGGRESSIVE_DYNAMIC_STATES},
+            },
+        )
+        state = str(row.get("aggressive_state") or "")
+        if state in AGGRESSIVE_DYNAMIC_STATES:
+            bucket[f"{state}_count"] += 1
+    return {
+        "total_rows": len(materialized),
+        "state_counts": counts,
+        "by_source_filter": list(grouped.values()),
+        "does_not_permanently_blacklist": True,
+        "cooldown_re_entry_status": "defined_only_until_multi_as_of_state_history_exists",
+    }
+
+
+def _state_feature_frame(as_of_features: pd.DataFrame, symbols: list[str]) -> pd.DataFrame:
+    if as_of_features.empty or "symbol" not in as_of_features.columns:
+        return pd.DataFrame(index=symbols)
+    safe_columns = ["symbol", *sorted((set(as_of_features.columns) & STATE_FEATURE_COLUMNS) - FORBIDDEN_FEATURE_COLUMNS)]
+    return as_of_features.loc[:, safe_columns].drop_duplicates("symbol").set_index("symbol").reindex(symbols)
+
+
+def _dynamic_state_for_symbol(
+    *,
+    symbol: str,
+    feature_row: pd.Series,
+    available_columns: set[str],
+    eligible_symbols: set[str],
+    risk_flags: list[str],
+    prior_state_history: dict[str, str],
+) -> tuple[str, str, int]:
+    if _has_explicit_cooldown_signal(feature_row, available_columns):
+        return "cooldown", "temporary cooldown from explicit as-of-safe recent signal failure", DEFAULT_COOLDOWN_DAYS
+    prior_state = prior_state_history.get(symbol)
+    if prior_state in {"watch_only", "blocked_now", "cooldown"} and symbol in eligible_symbols:
+        return "re_entry_candidate", "prior non-eligible state improved under current as-of features", 0
+    if symbol in eligible_symbols:
+        return "eligible", "passes selected aggressive filter as of this observation date", 0
+    if _has_hard_state_risk(risk_flags):
+        return "blocked_now", "temporary as-of-date state from hard risk controls; not a permanent exclusion", 0
+    return "watch_only", "temporary as-of-date watch state from mild confirmation gaps; not a permanent exclusion", 0
+
+
+def _state_risk_flags(row: pd.Series, available_columns: Iterable[str]) -> list[str]:
+    columns = set(available_columns)
+    flags: list[str] = []
+    volatility = _numeric_feature(row, "volatility") if "volatility" in columns else None
+    drawdown = _numeric_feature(row, "drawdown") if "drawdown" in columns else None
+    risk_score = _numeric_feature(row, "risk_score") if "risk_score" in columns else None
+    total_score = _numeric_feature(row, "total_score") if "total_score" in columns else None
+    momentum_score = _numeric_feature(row, "momentum_score") if "momentum_score" in columns else None
+    trend_score = _numeric_feature(row, "trend_score") if "trend_score" in columns else None
+    relative_strength_score = _numeric_feature(row, "relative_strength_score") if "relative_strength_score" in columns else None
+    liquidity_score = _numeric_feature(row, "liquidity_score") if "liquidity_score" in columns else None
+    amount = _numeric_feature(row, "amount") if "amount" in columns else None
+    volume = _numeric_feature(row, "volume") if "volume" in columns else None
+
+    if volatility is not None and volatility > 0.08:
+        flags.append("hard_high_volatility")
+    elif volatility is not None and volatility > 0.06:
+        flags.append("elevated_volatility")
+    if drawdown is not None and abs(drawdown) > 0.40:
+        flags.append("hard_excessive_drawdown")
+    elif drawdown is not None and abs(drawdown) > 0.30:
+        flags.append("elevated_drawdown")
+    if risk_score is not None and risk_score < 6.0:
+        flags.append("hard_weak_risk_score")
+    if total_score is not None and total_score < 45.0:
+        flags.append("hard_poor_total_score")
+    elif total_score is not None and total_score < 55.0:
+        flags.append("soft_low_total_score")
+    if momentum_score is not None and momentum_score < 10.0:
+        flags.append("weak_momentum_confirmation")
+    if trend_score is not None and trend_score < 8.0:
+        flags.append("weak_trend_confirmation")
+    if relative_strength_score is not None and relative_strength_score < 6.0:
+        flags.append("weak_relative_strength")
+    if liquidity_score is not None and liquidity_score < 5.0:
+        flags.append("liquidity_score_risk")
+    if amount is not None and amount < 50000000.0:
+        flags.append("amount_liquidity_risk")
+    if volume is not None and volume < 1000000.0:
+        flags.append("volume_liquidity_risk")
+    return flags
+
+
+def _re_entry_conditions(risk_flags: list[str], state: str) -> list[str]:
+    if state == "eligible":
+        return []
+    conditions = []
+    for flag in risk_flags:
+        if "volatility" in flag:
+            conditions.append("volatility normalizes under the selected cap")
+        elif "drawdown" in flag:
+            conditions.append("drawdown damage improves under the selected cap")
+        elif "risk_score" in flag:
+            conditions.append("risk_score improves above the filter threshold")
+        elif "total_score" in flag:
+            conditions.append("total_score improves enough for aggressive confirmation")
+        elif "momentum" in flag or "trend" in flag or "relative_strength" in flag:
+            conditions.append("momentum/trend/relative-strength confirmation improves")
+        elif "liquidity" in flag or "amount" in flag or "volume" in flag:
+            conditions.append("liquidity/activity conditions improve")
+    return sorted(set(conditions)) or ["recompute from next as-of feature snapshot"]
+
+
+def _has_hard_state_risk(risk_flags: list[str]) -> bool:
+    return any(flag.startswith("hard_") for flag in risk_flags)
+
+
+def _has_explicit_cooldown_signal(row: pd.Series, available_columns: set[str]) -> bool:
+    for field in STATE_COOLDOWN_FIELDS:
+        if field in available_columns and bool(row.get(field, False)):
+            return True
+    return False
+
+
+def _numeric_feature(row: pd.Series, field: str) -> float | None:
+    value = row.get(field)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _assert_no_future_state_columns() -> None:
+    forbidden = STATE_FEATURE_COLUMNS & FORBIDDEN_FEATURE_COLUMNS
+    if forbidden:
+        raise ValueError(f"Dynamic state assignment cannot use future/evaluation columns: {sorted(forbidden)}")
+
 def write_aggressive_filter_experiment_outputs(config: AggressiveFilterExperimentConfig, result: dict[str, object]) -> dict[str, str]:
     experiments_dir = Path(config.outputs_dir) / "experiments"
     experiments_dir.mkdir(parents=True, exist_ok=True)
@@ -162,6 +408,7 @@ def write_aggressive_filter_experiment_outputs(config: AggressiveFilterExperimen
 def render_aggressive_filter_experiment_report(result: dict[str, object]) -> str:
     summary = result.get("summary", {})
     rows = result.get("aggressive_filter_results", [])
+    dynamic_state_summary = result.get("dynamic_state_summary", {}) if isinstance(result.get("dynamic_state_summary"), dict) else {}
     lines = [
         "# Phase 2.8.3 Aggressive Filter Optimization Report",
         "",
@@ -174,6 +421,12 @@ def render_aggressive_filter_experiment_report(result: dict[str, object]) -> str
         f"- Valid future labels: {summary.get('valid_prediction_count')}",
         f"- No future leakage: {summary.get('no_future_leakage')}",
         f"- Production scoring replaced: {summary.get('production_scoring_replaced')}",
+        "",
+        "## Dynamic aggressive state layer",
+        "This state layer is as-of-date based and does not permanently blacklist stocks.",
+        "cooldown and re_entry_candidate require multi-as-of state history and are not fully validated with a single as-of date.",
+        "",
+        *_dynamic_state_count_lines(dynamic_state_summary),
         "",
         "## Baseline aggressive metrics",
         *_table(_baseline_rows(rows), ["source_strategy_family", "symbol_count_after_filter", "average_excess_return", "outperform_rate", "top_5_average_return", "failure_rate_below_minus_20pct"]),
@@ -520,6 +773,14 @@ def _baseline_rows(rows: object) -> list[dict[str, object]]:
     return [row for row in rows if isinstance(row, dict) and row.get("filter_id") == "none"] if isinstance(rows, list) else []
 
 
+def _dynamic_state_count_lines(dynamic_state_summary: dict[str, object]) -> list[str]:
+    counts = dynamic_state_summary.get("state_counts", {}) if isinstance(dynamic_state_summary, dict) else {}
+    lines = ["| aggressive_state | count |", "| --- | --- |"]
+    for state in AGGRESSIVE_DYNAMIC_STATES:
+        value = counts.get(state, 0) if isinstance(counts, dict) else 0
+        lines.append(f"| {state} | {value} |")
+    return lines
+
 def _table(rows: list[dict[str, object]], columns: list[str]) -> list[str]:
     if not rows:
         return ["No rows available."]
@@ -537,3 +798,8 @@ def _format_cell(value: object) -> str:
     if isinstance(value, list):
         return ", ".join(str(item) for item in value[:4])
     return str(value)
+
+
+
+
+

@@ -1,4 +1,4 @@
-# Phase 2.8.3 Aggressive Strategy Filter Optimization Framework
+﻿# Phase 2.8.3 Aggressive Strategy Filter Optimization Framework
 
 ## Scope
 
@@ -74,6 +74,19 @@ Each result reports:
 - left-tail reduction ratio versus same-family baseline
 - notes and validation status
 
+## Dynamic Aggressive State Layer
+
+The experiment also assigns symbol-level aggressive states for each source strategy family and filter:
+
+- `eligible`
+- `watch_only`
+- `blocked_now`
+- `cooldown`
+- `re_entry_candidate`
+
+These states are as-of-date based and do not permanently blacklist stocks. A symbol that fails one aggressive filter on one observation date must be recomputed from fresh as-of data at the next observation date.
+
+`cooldown` and `re_entry_candidate` are defined in this phase, but they require multi-as-of state history. With a single as-of date, the framework does not fake those states.
 ## Outputs
 
 When `--write-output` is used, the script writes:
@@ -99,3 +112,4 @@ python backend\scripts\run_aggressive_filter_experiments.py --as-of-date 2024-01
 - Still price-only / technical-only.
 - No full-market validation yet.
 - No 2025 validation yet.
+
