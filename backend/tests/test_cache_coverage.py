@@ -37,6 +37,50 @@ class CacheCoverageTests(unittest.TestCase):
             self.assertEqual(report["missing_count"], 1)
             self.assertEqual(report["missing_symbols"], ["BBB"])
 
+    def test_missing_symbols_file_does_not_silently_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+
+            with self.assertRaises(FileNotFoundError):
+                check_cache_coverage(
+                    CacheCoverageConfig(
+                        start_date="2024-08-01",
+                        end_date="2024-11-28",
+                        cache_dir=root / "cache",
+                        symbols_file=root / "missing_symbols.txt",
+                        limit=300,
+                    )
+                )
+
+    def test_empty_symbols_file_requires_explicit_allow(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            symbols_file = root / "symbols.txt"
+            symbols_file.write_text("", encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                check_cache_coverage(
+                    CacheCoverageConfig(
+                        start_date="2024-08-01",
+                        end_date="2024-11-28",
+                        cache_dir=root / "cache",
+                        symbols_file=symbols_file,
+                        limit=300,
+                    )
+                )
+
+            report = check_cache_coverage(
+                CacheCoverageConfig(
+                    start_date="2024-08-01",
+                    end_date="2024-11-28",
+                    cache_dir=root / "cache",
+                    symbols_file=symbols_file,
+                    limit=300,
+                    allow_empty_symbols=True,
+                )
+            )
+            self.assertEqual(report["symbol_count"], 0)
+
     def test_cache_coverage_cli_writes_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

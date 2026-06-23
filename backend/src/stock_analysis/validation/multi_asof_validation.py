@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from dataclasses import dataclass
@@ -128,6 +128,7 @@ def write_multi_asof_outputs(plan: dict[str, object], outputs_dir: str | Path) -
     validation_path = experiments_dir / "multi_asof_validation_plan_2024.json"
     cache_path = experiments_dir / "multi_asof_cache_plan_2024.json"
     summary_path = experiments_dir / "multi_asof_validation_summary_2024.md"
+    symbols_files = _write_multi_asof_symbols_files(plan, Path(outputs_dir))
     cache_payload = {
         "status": plan.get("status"),
         "provider_access": False,
@@ -137,7 +138,29 @@ def write_multi_asof_outputs(plan: dict[str, object], outputs_dir: str | Path) -
     validation_path.write_text(json.dumps(sanitize_for_json(plan), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     cache_path.write_text(json.dumps(sanitize_for_json(cache_payload), ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     summary_path.write_text(markdown_multi_asof_summary(plan), encoding="utf-8")
-    return {"validation_plan": str(validation_path), "cache_plan": str(cache_path), "summary_md": str(summary_path)}
+    return {"validation_plan": str(validation_path), "cache_plan": str(cache_path), "summary_md": str(summary_path), "symbols_files": symbols_files}
+
+
+def _write_multi_asof_symbols_files(plan: dict[str, object], outputs_dir: Path) -> list[str]:
+    cache_plan_dir = outputs_dir / "cache_plans"
+    written: list[str] = []
+    for requirement in plan.get("cache_requirements", []):
+        if not isinstance(requirement, dict):
+            continue
+        if requirement.get("status") != "evaluated":
+            continue
+        symbols = [str(symbol).strip() for symbol in requirement.get("symbols", []) if str(symbol).strip()]
+        if not symbols:
+            continue
+        as_of_date = str(requirement.get("as_of_date"))
+        horizon = int(requirement.get("horizon_days"))
+        path = cache_plan_dir / f"multi_asof_symbols_{as_of_date}_{horizon}d.txt"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(symbols) + "\n", encoding="utf-8")
+        requirement["symbols_file"] = str(path)
+        requirement["symbols_file_status"] = "written"
+        written.append(str(path))
+    return written
 
 
 def markdown_multi_asof_summary(plan: dict[str, object]) -> str:
@@ -306,10 +329,31 @@ def _cache_requirement(
             "manual_prewarm_command": "unavailable_missing_as_of_outputs",
             "notes": ["generate_as_of_labels_lists_first"],
         }
-    symbols = _load_symbols_for_as_of(outputs_dir, as_of_date, recommended_limit)
+    symbols = _load_symbols_for_cache_requirement(outputs_dir, as_of_date, horizon, recommended_limit)
+    if not symbols and not crosses_year_boundary:
+        return {
+            "cache_requirement_id": requirement_id,
+            "as_of_date": as_of_date,
+            "horizon_days": horizon,
+            "status": "blocked_empty_symbols",
+            "future_window": window,
+            "crosses_2025_boundary": crosses_year_boundary,
+            "deferred_until_2025_allowed": crosses_year_boundary,
+            "symbol_count": 0,
+            "covered_count": 0,
+            "missing_count": 0,
+            "missing_symbols": [],
+            "symbols": [],
+            "provider_access": False,
+            "manual_cache_coverage_command": "unavailable_empty_symbols",
+            "manual_prewarm_command": "unavailable_empty_symbols",
+            "notes": ["no_symbols_loaded_from_as_of_outputs"],
+        }
     rows = [_coverage_status(cache_dir, provider=provider, symbol=symbol, start_date=window["start_date"], end_date=window["end_date"]) for symbol in symbols]
     covered_count = sum(1 for row in rows if row["covered"])
     missing_symbols = [row["symbol"] for row in rows if not row["covered"]]
+    coverage_limit = len(symbols) if symbols else recommended_limit
+    symbols_file = _symbols_file_path(as_of_date, horizon)
     return {
         "cache_requirement_id": requirement_id,
         "as_of_date": as_of_date,
@@ -322,9 +366,11 @@ def _cache_requirement(
         "covered_count": covered_count,
         "missing_count": len(missing_symbols),
         "missing_symbols": missing_symbols,
+        "symbols": symbols,
+        "symbols_file": "not_generated_2025_boundary" if crosses_year_boundary else str(symbols_file),
         "provider_access": False,
-        "manual_cache_coverage_command": "not_generated_2025_boundary" if crosses_year_boundary else _cache_coverage_command(as_of_date, horizon, window, recommended_limit),
-        "manual_prewarm_command": "not_generated_2025_boundary" if crosses_year_boundary else _prewarm_command(provider, window, recommended_limit),
+        "manual_cache_coverage_command": "not_generated_2025_boundary" if crosses_year_boundary else _cache_coverage_command(as_of_date, horizon, window, coverage_limit),
+        "manual_prewarm_command": "not_generated_2025_boundary" if crosses_year_boundary else _prewarm_command(provider, window, coverage_limit),
     }
 
 
@@ -350,6 +396,10 @@ def _manual_validation_commands(
     return {"strategy_family": strategy, "aggressive_filter": aggressive}
 
 
+def _symbols_file_path(as_of_date: str, horizon: int) -> Path:
+    return Path("outputs") / "cache_plans" / f"multi_asof_symbols_{as_of_date}_{horizon}d.txt"
+
+
 def _cache_coverage_command(as_of_date: str, horizon: int, window: dict[str, str], limit: int) -> str:
     return (
         "python backend\\scripts\\check_cache_coverage.py "
@@ -368,19 +418,58 @@ def _prewarm_command(provider: str, window: dict[str, str], limit: int) -> str:
     )
 
 
+def _load_symbols_for_cache_requirement(outputs_dir: Path, as_of_date: str, horizon: int, limit: int) -> list[str]:
+    prediction_path = outputs_dir / "validation" / f"walk_forward_predictions_{as_of_date}_{horizon}d.csv"
+    if prediction_path.exists():
+        frame = pd.read_csv(prediction_path, dtype={"symbol": str})
+        if "symbol" in frame.columns:
+            return _dedupe(str(symbol).strip() for symbol in frame["symbol"].dropna())
+    return _load_symbols_for_as_of(outputs_dir, as_of_date, limit)
+
+
 def _load_symbols_for_as_of(outputs_dir: Path, as_of_date: str, limit: int) -> list[str]:
-    candidates = [
+    symbols: list[str] = []
+    list_json_paths = [
         outputs_dir / "labels" / f"stock_labels_{as_of_date}.json",
         outputs_dir / "labels" / f"candidate_labels_{as_of_date}.json",
         outputs_dir / "daily" / f"candidates_{as_of_date}.json",
     ]
-    for path in candidates:
+    for path in list_json_paths:
         if not path.exists():
             continue
         payload = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(payload, list):
-            return _dedupe(str(row.get("symbol", "")).strip() for row in payload if isinstance(row, dict) and row.get("symbol"))[:limit]
-    return []
+            symbols.extend(str(row.get("symbol", "")).strip() for row in payload if isinstance(row, dict) and row.get("symbol"))
+    factors_path = outputs_dir / "daily" / f"factors_{as_of_date}.csv"
+    if factors_path.exists():
+        frame = pd.read_csv(factors_path, dtype={"symbol": str})
+        if "symbol" in frame.columns:
+            symbols.extend(str(symbol).strip() for symbol in frame["symbol"].dropna())
+    symbols.extend(_load_as_of_list_symbols(outputs_dir, as_of_date))
+    return _dedupe(symbols)[:limit]
+
+
+def _load_as_of_list_symbols(outputs_dir: Path, as_of_date: str) -> list[str]:
+    symbols: list[str] = []
+    high_confidence_path = outputs_dir / "lists" / f"high_confidence_candidates_{as_of_date}.json"
+    if high_confidence_path.exists():
+        payload = json.loads(high_confidence_path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            symbols.extend(_symbols_from_items(payload.get("items", [])))
+    multi_lists_path = outputs_dir / "lists" / f"multi_lists_{as_of_date}.json"
+    if multi_lists_path.exists():
+        payload = json.loads(multi_lists_path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            for list_payload in payload.get("lists", {}).values() if isinstance(payload.get("lists"), dict) else []:
+                if isinstance(list_payload, dict):
+                    symbols.extend(_symbols_from_items(list_payload.get("items", [])))
+    return symbols
+
+
+def _symbols_from_items(items: object) -> list[str]:
+    if not isinstance(items, list):
+        return []
+    return [str(item.get("symbol", "")).strip() for item in items if isinstance(item, dict) and item.get("symbol")]
 
 
 def _coverage_status(cache_dir: Path, *, provider: str, symbol: str, start_date: str, end_date: str) -> dict[str, object]:

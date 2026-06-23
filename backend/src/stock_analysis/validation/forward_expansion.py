@@ -43,6 +43,7 @@ class CacheCoverageConfig:
     symbols_file: str | Path | None = None
     limit: int | None = 50
     provider: str = "baostock"
+    allow_empty_symbols: bool = False
 
 
 @dataclass(frozen=True)
@@ -310,12 +311,15 @@ def _load_symbols(config: CacheCoverageConfig) -> list[str]:
         symbols = _load_default_symbols(Path(config.outputs_dir))
     if config.limit is not None and config.limit > 0:
         symbols = symbols[: config.limit]
+    if not symbols and not config.allow_empty_symbols:
+        source = f"symbols_file={config.symbols_file}" if config.symbols_file else f"outputs_dir={config.outputs_dir}"
+        raise ValueError(f"cache coverage requires at least one symbol; {source} produced zero symbols")
     return symbols
 
 
 def _read_symbol_lines(path: Path) -> list[str]:
     if not path.exists():
-        return []
+        raise FileNotFoundError(f"symbols_file not found: {path}")
     result = []
     for line in path.read_text(encoding="utf-8").splitlines():
         value = line.strip()
