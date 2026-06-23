@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import subprocess
@@ -109,6 +109,92 @@ def test_multi_window_summary_reads_nested_multi_asof_plan(tmp_path: Path) -> No
     ready = summary["ready_windows_used"][0]
     assert ready["plan_ready"] is True
     assert ready["plan_status"] == "ready_for_comparison"
+
+def test_multi_window_summary_defaults_to_all_plan_ready_windows(tmp_path: Path) -> None:
+    outputs_dir = tmp_path / "outputs"
+    experiments_dir = outputs_dir / "experiments"
+    experiments_dir.mkdir(parents=True)
+    plan_file = experiments_dir / "multi_asof_validation_plan_2024.json"
+    plan_file.write_text(
+        json.dumps(
+            {
+                "as_of_plan": [
+                    {
+                        "as_of_date": "2024-01-31",
+                        "horizons": [
+                            {"horizon_days": 20, "ready_for_comparison": True}
+                        ],
+                    },
+                    {
+                        "as_of_date": "2024-04-30",
+                        "horizons": [
+                            {
+                                "horizon_days": 120,
+                                "ready_for_comparison": False,
+                                "missing_outputs": {
+                                    "strategy_family_experiments": "outputs/experiments/strategy_family_experiments_2024-04-30_120d.json"
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "as_of_date": "2024-07-31",
+                        "horizons": [
+                            {"horizon_days": 20, "ready_for_comparison": True},
+                            {
+                                "horizon_days": 60,
+                                "ready_for_comparison": False,
+                                "missing_outputs": {
+                                    "aggressive_filter_experiments": "outputs/experiments/aggressive_filter_experiments_2024-07-31_60d.json"
+                                },
+                            },
+                        ],
+                    },
+                    {
+                        "as_of_date": "2024-10-31",
+                        "horizons": [
+                            {
+                                "horizon_days": 20,
+                                "ready_for_comparison": False,
+                                "missing_as_of_outputs": {
+                                    "stock_labels": "outputs/labels/stock_labels_2024-10-31.json"
+                                },
+                            }
+                        ],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_window(experiments_dir, "2024-01-31", 20, excess=0.04, sample=30)
+    _write_window(experiments_dir, "2024-07-31", 20, excess=0.05, sample=28)
+
+    summary = build_multi_window_experiment_summary(
+        MultiWindowSummaryConfig(
+            outputs_dir=outputs_dir,
+            plan_file=plan_file,
+            min_valid_count=10,
+        )
+    )
+
+    ready_windows = {
+        (row["as_of_date"], row["horizon_days"])
+        for row in summary["ready_windows_used"]
+    }
+    assert ready_windows == {("2024-01-31", 20), ("2024-07-31", 20)}
+    assert summary["summary"]["ready_window_count"] == 2
+
+    skipped = {
+        (row["as_of_date"], row["horizon_days"]): row
+        for row in summary["excluded_or_missing_windows"]
+    }
+    assert ("2024-04-30", 120) in skipped
+    assert ("2024-07-31", 60) in skipped
+    assert ("2024-10-31", 20) in skipped
+    assert skipped[("2024-04-30", 120)]["status"] == "missing_experiment_outputs"
+    assert skipped[("2024-10-31", 20)]["status"] == "blocked_missing_as_of_outputs"
+
 
 def test_aggressive_filter_penalizes_small_n_and_right_tail_destruction(
     tmp_path: Path,

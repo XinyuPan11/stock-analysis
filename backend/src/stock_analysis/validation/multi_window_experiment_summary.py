@@ -1,10 +1,10 @@
-﻿"""Summarize ready strategy experiment windows without running data jobs."""
+"""Summarize ready strategy experiment windows without running data jobs."""
 
 from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
 from typing import Any
@@ -44,7 +44,7 @@ SAME_PERIOD_NOTE = (
 class MultiWindowSummaryConfig:
     outputs_dir: Path
     plan_file: Path
-    windows: tuple[tuple[str, int], ...] = DEFAULT_WINDOWS
+    windows: tuple[tuple[str, int], ...] | None = None
     min_valid_count: int = 10
 
 
@@ -69,6 +69,7 @@ def build_multi_window_experiment_summary(config: MultiWindowSummaryConfig) -> d
     experiments_dir = outputs_dir / "experiments"
     plan = _load_json(Path(config.plan_file)) if Path(config.plan_file).exists() else {}
     plan_lookup = _build_plan_lookup(plan)
+    selected_windows = config.windows or _ready_windows_from_plan(plan_lookup) or DEFAULT_WINDOWS
 
     ready_windows: list[dict[str, Any]] = []
     missing_windows: list[dict[str, Any]] = []
@@ -76,7 +77,9 @@ def build_multi_window_experiment_summary(config: MultiWindowSummaryConfig) -> d
     aggressive_rows: list[dict[str, Any]] = []
     source_files: list[str] = []
 
-    for as_of_date, horizon_days in config.windows:
+    selected_window_set = set(selected_windows)
+
+    for as_of_date, horizon_days in selected_windows:
         window = _window_files(experiments_dir, as_of_date, horizon_days, plan_lookup)
         missing: list[str] = []
         if not window.strategy_file.exists():
@@ -121,6 +124,10 @@ def build_multi_window_experiment_summary(config: MultiWindowSummaryConfig) -> d
             for row in aggressive_payload.get("aggressive_filter_results", [])
         )
 
+    missing_windows.extend(
+        _skipped_plan_windows(plan_lookup, selected_window_set, experiments_dir)
+    )
+
     strategy_summary = _summarize_strategy_families(strategy_rows, config.min_valid_count)
     aggressive_summary = _summarize_aggressive_filters(aggressive_rows, config.min_valid_count)
     recommended = _recommended_interpretation(strategy_summary, aggressive_summary)
@@ -136,7 +143,7 @@ def build_multi_window_experiment_summary(config: MultiWindowSummaryConfig) -> d
             f"{exploratory_count} aggressive filter rows are exploratory_same_period."
         )
     if missing_windows:
-        warnings.append("Some default windows are missing experiment outputs.")
+        warnings.append("Some plan windows were excluded or are missing experiment outputs.")
 
     return {
         "summary": {
@@ -328,6 +335,64 @@ def _build_plan_lookup(plan: dict[str, Any]) -> dict[tuple[str, int], dict[str, 
                 "status": _plan_window_status(horizon_row),
             }
     return lookup
+
+
+def _ready_windows_from_plan(
+    plan_lookup: dict[tuple[str, int], dict[str, Any]],
+) -> tuple[tuple[str, int], ...]:
+    return tuple(
+        window
+        for window, row in plan_lookup.items()
+        if row.get("ready_for_comparison") is True
+    )
+
+
+def _skipped_plan_windows(
+    plan_lookup: dict[tuple[str, int], dict[str, Any]],
+    selected_windows: set[tuple[str, int]],
+    experiments_dir: Path,
+) -> list[dict[str, Any]]:
+    skipped: list[dict[str, Any]] = []
+    for (as_of_date, horizon_days), row in plan_lookup.items():
+        if (as_of_date, horizon_days) in selected_windows:
+            continue
+        status = _plan_window_status(row)
+        missing_outputs = row.get("missing_outputs") or {}
+        missing_as_of_outputs = row.get("missing_as_of_outputs") or {}
+        missing_files = [str(value) for value in missing_outputs.values()]
+        missing_files.extend(str(value) for value in missing_as_of_outputs.values())
+        skipped.append(
+            {
+                "as_of_date": as_of_date,
+                "horizon_days": horizon_days,
+                "status": status,
+                "plan_status": status,
+                "plan_ready": row.get("ready_for_comparison"),
+                "missing_files": missing_files,
+                "reason": _skipped_window_reason(row, status),
+                "strategy_file": str(
+                    experiments_dir
+                    / f"strategy_family_experiments_{as_of_date}_{horizon_days}d.json"
+                ),
+                "aggressive_file": str(
+                    experiments_dir
+                    / f"aggressive_filter_experiments_{as_of_date}_{horizon_days}d.json"
+                ),
+            }
+        )
+    return skipped
+
+
+def _skipped_window_reason(row: dict[str, Any], status: str) -> str:
+    if status == "deferred_crosses_2025":
+        return "deferred because future window crosses 2025"
+    if status == "blocked_missing_as_of_outputs":
+        return "blocked because required as-of outputs are missing"
+    if status == "missing_experiment_outputs":
+        return "missing experiment outputs"
+    if row.get("ready_for_comparison") is not True:
+        return "not ready_for_comparison in plan"
+    return status
 
 
 def _plan_window_status(row: dict[str, Any]) -> str:

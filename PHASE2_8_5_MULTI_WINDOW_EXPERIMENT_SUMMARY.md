@@ -14,13 +14,12 @@ does not run a full workflow.
 - outputs/experiments/aggressive_filter_experiments_<as_of_date>_<horizon>d.json
 - outputs/experiments/multi_asof_validation_plan_2024.json
 
-Default windows:
+Default behavior:
 
-- 2024-01-31 20d
-- 2024-01-31 60d
-- 2024-01-31 120d
-- 2024-04-30 20d
-- 2024-04-30 60d
+- Read outputs/experiments/multi_asof_validation_plan_2024.json.
+- Include every plan window where ready_for_comparison is true.
+- Exclude and explain windows that are missing experiment outputs, blocked by missing as-of outputs, or deferred.
+- Optional --windows can still be used to inspect an explicit subset.
 
 ## Outputs
 
@@ -49,7 +48,8 @@ Write JSON and markdown outputs:
 ## Recommended Use
 
 Use this report to reduce manual copy and paste while reviewing whether strategy
-families and aggressive filters remain stable across ready controlled windows.
+families and aggressive filters remain stable across all ready controlled windows
+listed in the multi-as-of plan.
 Long-term stable and conservative quality profiles may become stable baseline
 candidates only when supported across windows. Momentum breakout remains an
 aggressive candidate only when multi-window evidence supports it. Right-tail
