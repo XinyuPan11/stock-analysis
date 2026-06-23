@@ -12,7 +12,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from stock_analysis.validation.multi_window_experiment_summary import (  # noqa: E402
-    DEFAULT_WINDOWS,
     MultiWindowSummaryConfig,
     build_multi_window_experiment_summary,
     write_multi_window_experiment_summary_outputs,
@@ -31,8 +30,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-valid-count", type=int, default=10)
     parser.add_argument(
         "--windows",
-        default=",".join(f"{date}:{horizon}" for date, horizon in DEFAULT_WINDOWS),
-        help="Comma-separated windows like 2024-01-31:20,2024-04-30:60.",
+        default=None,
+        help=(
+            "Optional comma-separated windows like 2024-01-31:20,2024-04-30:60. "
+            "When omitted, all ready_for_comparison windows from the plan are used."
+        ),
     )
     parser.add_argument(
         "--write-output",
@@ -47,7 +49,7 @@ def main() -> int:
     config = MultiWindowSummaryConfig(
         outputs_dir=Path(args.outputs_dir),
         plan_file=Path(args.plan_file),
-        windows=_parse_windows(args.windows),
+        windows=_parse_windows(args.windows) if args.windows else None,
         min_valid_count=args.min_valid_count,
     )
     summary = build_multi_window_experiment_summary(config)
