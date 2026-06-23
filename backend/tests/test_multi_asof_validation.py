@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import subprocess
@@ -84,6 +84,7 @@ class MultiAsOfValidationTests(unittest.TestCase):
             cache = root / "cache"
             _write_as_of_outputs(outputs, "2024-01-31", 20)
             _write_required_as_of_outputs(outputs, "2024-01-31", ["AAA", "BBB"])
+            _write_walk_forward_predictions(outputs, "2024-01-31", 20, ["AAA", "BBB"])
             _write_price(cache / "baostock" / "stock_daily" / "adjusted" / "AAA.csv", "AAA", [("2024-02-01", 10.0)])
 
             plan = build_multi_asof_validation_plan(
@@ -106,6 +107,51 @@ class MultiAsOfValidationTests(unittest.TestCase):
             self.assertEqual(cache_requirement["covered_count"], 1)
             self.assertEqual(cache_requirement["missing_symbols"], ["BBB"])
             self.assertFalse(cache_requirement["provider_access"])
+
+    def test_write_outputs_creates_symbols_files_for_eligible_non_deferred_windows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            outputs = root / "outputs"
+            cache = root / "cache"
+            _write_as_of_outputs(outputs, "2024-07-31", 20)
+            _write_walk_forward_predictions(outputs, "2024-07-31", 60, ["CCC", "DDD", "EEE"])
+            _write_required_as_of_outputs(outputs, "2024-07-31", ["AAA", "BBB", "CCC"] )
+
+            plan = build_multi_asof_validation_plan(
+                MultiAsOfValidationConfig(
+                    outputs_dir=outputs,
+                    cache_dir=cache,
+                    as_of_dates=("2024-07-31",),
+                    horizons=(20, 60, 120),
+                    recommended_limit=2,
+                )
+            )
+            paths = write_multi_asof_outputs(plan, outputs)
+
+            written = {Path(path).name for path in paths["symbols_files"]}
+            self.assertIn("multi_asof_symbols_2024-07-31_20d.txt", written)
+            self.assertIn("multi_asof_symbols_2024-07-31_60d.txt", written)
+            self.assertNotIn("multi_asof_symbols_2024-07-31_120d.txt", written)
+            symbols_60 = (outputs / "cache_plans" / "multi_asof_symbols_2024-07-31_60d.txt").read_text(encoding="utf-8").splitlines()
+            self.assertEqual(symbols_60, ["CCC", "DDD", "EEE"])
+
+            cache_payload = json.loads((outputs / "experiments" / "multi_asof_cache_plan_2024.json").read_text(encoding="utf-8"))
+            by_id = {row["cache_requirement_id"]: row for row in cache_payload["cache_requirements"]}
+            self.assertEqual(by_id["2024-07-31_60d"]["symbol_count"], 3)
+            self.assertIn("multi_asof_symbols_2024-07-31_60d.txt", by_id["2024-07-31_60d"]["manual_cache_coverage_command"])
+            self.assertIn("--limit 3", by_id["2024-07-31_60d"]["manual_cache_coverage_command"])
+            self.assertEqual(by_id["2024-07-31_120d"]["symbols_file"], "not_generated_2025_boundary")
+
+    def test_blocked_missing_as_of_outputs_do_not_create_symbols_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plan = build_multi_asof_validation_plan(
+                MultiAsOfValidationConfig(outputs_dir=root / "outputs", cache_dir=root / "cache", as_of_dates=("2024-10-31",), horizons=(20,))
+            )
+            paths = write_multi_asof_outputs(plan, root / "outputs")
+
+            self.assertEqual(paths["symbols_files"], [])
+            self.assertFalse((root / "outputs" / "cache_plans" / "multi_asof_symbols_2024-10-31_20d.txt").exists())
 
     def test_write_outputs_creates_required_json_and_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -164,6 +210,17 @@ class MultiAsOfValidationTests(unittest.TestCase):
             self.assertIn('"prewarm_executed": false', completed.stdout)
             self.assertIn('"full_workflow_executed": false', completed.stdout)
             self.assertTrue((root / "outputs" / "experiments" / "multi_asof_validation_plan_2024.json").exists())
+
+
+def _write_walk_forward_predictions(outputs: Path, as_of_date: str, horizon: int, symbols: list[str]) -> None:
+    path = outputs / "validation" / f"walk_forward_predictions_{as_of_date}_{horizon}d.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {"symbol": symbol, "future_return": 0.1, "data_quality": "ok"}
+            for symbol in symbols
+        ]
+    ).to_csv(path, index=False, encoding="utf-8")
 
 
 def _write_as_of_outputs(outputs: Path, as_of_date: str, horizon: int) -> None:

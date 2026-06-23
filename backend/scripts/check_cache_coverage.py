@@ -25,6 +25,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=50, help="Maximum symbols to inspect. Use 0 for no limit.")
     parser.add_argument("--output-file", default=None)
     parser.add_argument("--provider", default="baostock")
+    parser.add_argument("--allow-empty-symbols", action="store_true", help="Explicitly allow an empty symbol set for diagnostics.")
     args = parser.parse_args()
 
     limit = None if args.limit <= 0 else args.limit
@@ -37,6 +38,7 @@ def main() -> int:
             symbols_file=args.symbols_file,
             limit=limit,
             provider=args.provider,
+            allow_empty_symbols=args.allow_empty_symbols,
         )
     )
     output_file = Path(args.output_file) if args.output_file else default_coverage_output(args.outputs_dir, args.start_date, args.end_date, limit)
