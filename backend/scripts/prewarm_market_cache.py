@@ -39,6 +39,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--failed-symbols-file", default=None)
     parser.add_argument("--retry-only", action="store_true")
     parser.add_argument("--include-lookback-days", type=int, default=0)
+    parser.add_argument("--symbol-timeout-seconds", type=float, default=None)
+    parser.add_argument("--max-consecutive-symbol-timeouts", type=int, default=None)
+    parser.add_argument("--failed-symbols-output", default=None)
+    parser.add_argument("--progress-log", default=None)
     return parser.parse_args(argv)
 
 
@@ -72,6 +76,10 @@ def main() -> int:
             retry=args.retry,
             symbols=symbols,
             retry_only=args.retry_only,
+            symbol_timeout_seconds=args.symbol_timeout_seconds,
+            max_consecutive_symbol_timeouts=args.max_consecutive_symbol_timeouts,
+            failed_symbols_output=args.failed_symbols_output,
+            progress_log=args.progress_log,
         ),
     )
 

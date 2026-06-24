@@ -10,6 +10,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from stock_analysis.data.cache import LocalCsvCache
+from stock_analysis.data import cache_prewarm
 from stock_analysis.data.cache_prewarm import CachePrewarmConfig, load_symbols_file, run_cache_prewarm
 
 
@@ -164,6 +165,65 @@ class CachePrewarmTests(unittest.TestCase):
 
             self.assertEqual(result.summary["error_type_counts"], {"non_numeric_market_data": 2})
 
+    def test_symbol_timeout_records_failed_symbol_and_stops_after_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = FakePrewarmService(LocalCsvCache(temp_dir))
+            failed_path = Path(temp_dir) / "failed_symbols.csv"
+            progress_path = Path(temp_dir) / "progress.jsonl"
+            original = cache_prewarm._fetch_with_symbol_timeout
+
+            def fake_timeout(item: dict[str, str], config: CachePrewarmConfig) -> tuple[bool, dict[str, object]]:
+                return False, cache_prewarm._error_row(
+                    item,
+                    config,
+                    "symbol_timeout",
+                    "Symbol fetch timed out after 1 seconds during provider_fetch.",
+                    1,
+                )
+
+            cache_prewarm._fetch_with_symbol_timeout = fake_timeout
+            try:
+                result = run_cache_prewarm(
+                    service,
+                    _config(
+                        cache_dir=temp_dir,
+                        output_dir=temp_dir,
+                        limit=3,
+                        symbol_timeout_seconds=1,
+                        max_consecutive_symbol_timeouts=2,
+                        failed_symbols_output=failed_path,
+                        progress_log=progress_path,
+                    ),
+                )
+            finally:
+                cache_prewarm._fetch_with_symbol_timeout = original
+
+            self.assertEqual(result.summary["timeout_count"], 2)
+            self.assertTrue(result.summary["stopped_early"])
+            self.assertEqual(result.summary["stop_reason"], "max_consecutive_symbol_timeouts")
+            self.assertEqual(result.output_paths["errors_csv"], str(failed_path.resolve()))
+            failed = pd.read_csv(failed_path)
+            self.assertEqual(failed["error_type"].tolist(), ["symbol_timeout", "symbol_timeout"])
+            self.assertEqual(failed["stage"].tolist(), ["provider_fetch", "provider_fetch"])
+            self.assertTrue(progress_path.exists())
+
+    def test_resume_progress_skips_already_covered_symbol(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = LocalCsvCache(temp_dir)
+            service = FakePrewarmService(cache)
+            run_cache_prewarm(service, _config(cache_dir=temp_dir, output_dir=temp_dir, limit=1))
+            progress_path = Path(temp_dir) / "progress.jsonl"
+
+            result = run_cache_prewarm(
+                service,
+                _config(cache_dir=temp_dir, output_dir=temp_dir, limit=1, resume=True, progress_log=progress_path),
+            )
+
+            self.assertEqual(result.summary["skipped_count"], 1)
+            lines = progress_path.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(any('"status": "cache_hit_skipped"' in line for line in lines))
+
+
 
 def _config(
     *,
@@ -175,6 +235,10 @@ def _config(
     resume: bool = False,
     symbols: tuple[str, ...] = (),
     include_lookback_days: int = 0,
+    symbol_timeout_seconds: float | None = None,
+    max_consecutive_symbol_timeouts: int | None = None,
+    failed_symbols_output: str | Path | None = None,
+    progress_log: str | Path | None = None,
 ) -> CachePrewarmConfig:
     return CachePrewarmConfig(
         provider="unit",
@@ -190,6 +254,10 @@ def _config(
         resume=resume,
         retry=retry,
         symbols=symbols,
+        symbol_timeout_seconds=symbol_timeout_seconds,
+        max_consecutive_symbol_timeouts=max_consecutive_symbol_timeouts,
+        failed_symbols_output=failed_symbols_output,
+        progress_log=progress_log,
     )
 
 
