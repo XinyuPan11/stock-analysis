@@ -34,18 +34,21 @@ Default behavior:
 
 Dry-run summary:
 
-    python backend/scripts/summarize_multi_window_experiments.py --outputs-dir outputs --plan-file outputs/experiments/multi_asof_validation_plan_2024.json --min-valid-count 50 --min-coverage-rate 0.7
+    python backend/scripts/summarize_multi_window_experiments.py --outputs-dir outputs --plan-file outputs/experiments/multi_asof_validation_plan_2024.json --min-valid-count 50 --min-coverage-rate 0.7 --min-filter-sample-count 10
 
 Write JSON and markdown outputs:
 
-    python backend/scripts/summarize_multi_window_experiments.py --outputs-dir outputs --plan-file outputs/experiments/multi_asof_validation_plan_2024.json --min-valid-count 50 --min-coverage-rate 0.7 --write-output
+    python backend/scripts/summarize_multi_window_experiments.py --outputs-dir outputs --plan-file outputs/experiments/multi_asof_validation_plan_2024.json --min-valid-count 50 --min-coverage-rate 0.7 --min-filter-sample-count 10 --write-output
 
 ## Quality Gates
 
+- `window_min_valid_count` / `--min-valid-count` checks whether a whole as-of/horizon window has enough valid labels for comparison.
+- `filter_min_sample_count` / `--min-filter-sample-count` checks whether a specific aggressive filtered subset has enough observations for exploratory comparison.
 - `comparison_eligible` is true only when valid_prediction_count >= min_valid_count.
 - `high_quality_ready` is true only when comparison_eligible is true and valid coverage ratio >= min_coverage_rate.
 - Low-coverage but comparison-eligible windows remain exploratory and are labeled clearly.
 - Low-valid-count windows are not silently aggregated as normal evidence.
+- Aggressive filters use `min_filter_sample_count` for `sample_too_small`; they do not inherit the window-level `min_valid_count`.
 
 ## Interpretation Rules
 

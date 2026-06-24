@@ -283,6 +283,103 @@ def test_multi_window_summary_excludes_low_valid_count_windows(tmp_path: Path) -
 
 
 
+def test_aggressive_filter_uses_separate_sample_threshold(tmp_path: Path) -> None:
+    outputs_dir = tmp_path / "outputs"
+    experiments_dir = outputs_dir / "experiments"
+    experiments_dir.mkdir(parents=True)
+    plan_file = experiments_dir / "multi_asof_validation_plan_2024.json"
+    _write_plan(plan_file, [("2024-07-31", 20), ("2024-07-31", 60)])
+    _write_window(
+        experiments_dir,
+        "2024-07-31",
+        20,
+        excess=0.10,
+        sample=14,
+        prediction_count=300,
+        valid_prediction_count=250,
+    )
+    _write_window(
+        experiments_dir,
+        "2024-07-31",
+        60,
+        excess=0.08,
+        sample=12,
+        prediction_count=300,
+        valid_prediction_count=250,
+    )
+
+    summary = build_multi_window_experiment_summary(
+        MultiWindowSummaryConfig(
+            outputs_dir=outputs_dir,
+            plan_file=plan_file,
+            min_valid_count=50,
+            min_coverage_rate=0.7,
+            min_filter_sample_count=10,
+        )
+    )
+
+    aggressive = summary["aggressive_filter_stability"][0]
+    assert aggressive["sample_count_min"] == 12
+    assert aggressive["classification"] != "sample_too_small"
+    assert aggressive["classification"] == "strong_filter_candidate"
+    assert summary["summary"]["min_valid_count"] == 50
+    assert summary["summary"]["min_filter_sample_count"] == 10
+
+    stricter_summary = build_multi_window_experiment_summary(
+        MultiWindowSummaryConfig(
+            outputs_dir=outputs_dir,
+            plan_file=plan_file,
+            min_valid_count=50,
+            min_coverage_rate=0.7,
+            min_filter_sample_count=15,
+        )
+    )
+    stricter_aggressive = stricter_summary["aggressive_filter_stability"][0]
+    assert stricter_aggressive["classification"] == "sample_too_small"
+
+
+def test_aggressive_filter_below_filter_sample_threshold_stays_small_n(tmp_path: Path) -> None:
+    outputs_dir = tmp_path / "outputs"
+    experiments_dir = outputs_dir / "experiments"
+    experiments_dir.mkdir(parents=True)
+    plan_file = experiments_dir / "multi_asof_validation_plan_2024.json"
+    _write_plan(plan_file, [("2024-07-31", 20), ("2024-07-31", 60)])
+    _write_window(
+        experiments_dir,
+        "2024-07-31",
+        20,
+        excess=0.10,
+        sample=8,
+        prediction_count=300,
+        valid_prediction_count=250,
+    )
+    _write_window(
+        experiments_dir,
+        "2024-07-31",
+        60,
+        excess=0.08,
+        sample=9,
+        prediction_count=300,
+        valid_prediction_count=250,
+    )
+
+    summary = build_multi_window_experiment_summary(
+        MultiWindowSummaryConfig(
+            outputs_dir=outputs_dir,
+            plan_file=plan_file,
+            min_valid_count=50,
+            min_coverage_rate=0.7,
+            min_filter_sample_count=10,
+        )
+    )
+
+    aggressive = summary["aggressive_filter_stability"][0]
+    assert aggressive["sample_count_min"] == 8
+    assert aggressive["classification"] == "sample_too_small"
+    assert "small_n_window" in aggressive["warnings"]
+
+
+
 def test_aggressive_filter_penalizes_small_n_and_right_tail_destruction(
     tmp_path: Path,
 ) -> None:

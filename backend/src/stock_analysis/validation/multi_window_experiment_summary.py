@@ -51,6 +51,7 @@ class MultiWindowSummaryConfig:
     windows: tuple[tuple[str, int], ...] | None = None
     min_valid_count: int = 50
     min_coverage_rate: float = 0.7
+    min_filter_sample_count: int = 10
 
 
 @dataclass
@@ -161,7 +162,10 @@ def build_multi_window_experiment_summary(config: MultiWindowSummaryConfig) -> d
     )
 
     strategy_summary = _summarize_strategy_families(strategy_rows, config.min_valid_count)
-    aggressive_summary = _summarize_aggressive_filters(aggressive_rows, config.min_valid_count)
+    aggressive_summary = _summarize_aggressive_filters(
+        aggressive_rows,
+        config.min_filter_sample_count,
+    )
     recommended = _recommended_interpretation(strategy_summary, aggressive_summary)
 
     exploratory_count = sum(
@@ -199,6 +203,7 @@ def build_multi_window_experiment_summary(config: MultiWindowSummaryConfig) -> d
             "no_future_leakage": True,
             "min_valid_count": config.min_valid_count,
             "min_coverage_rate": config.min_coverage_rate,
+            "min_filter_sample_count": config.min_filter_sample_count,
             "ready_window_count": len(ready_windows),
             "high_quality_window_count": sum(1 for row in ready_windows if row.get("high_quality_ready")),
             "low_coverage_window_count": sum(1 for row in ready_windows if row.get("quality_status") == "low_coverage"),
@@ -588,7 +593,7 @@ def _summarize_strategy_families(
 
 def _summarize_aggressive_filters(
     rows: list[dict[str, Any]],
-    min_valid_count: int,
+    min_filter_sample_count: int,
 ) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in rows:
@@ -609,7 +614,7 @@ def _summarize_aggressive_filters(
             1
             for row in group
             if row.get("validation_status") == "insufficient_data"
-            or (_sample_count(row) or 0) < min_valid_count
+            or (_sample_count(row) or 0) < min_filter_sample_count
         )
         row = {
             "source_strategy_family": source_family,
@@ -645,10 +650,10 @@ def _summarize_aggressive_filters(
             ),
             "sample_count_min": _min(sample_counts),
             "sample_count_median": _median(sample_counts),
-            "warnings": _aggressive_warnings(group, min_valid_count),
+            "warnings": _aggressive_warnings(group, min_filter_sample_count),
             "windows": _window_metrics(group),
         }
-        row["classification"] = _classify_aggressive_filter(row, min_valid_count)
+        row["classification"] = _classify_aggressive_filter(row, min_filter_sample_count)
         summaries.append(row)
     return summaries
 
@@ -678,7 +683,10 @@ def _classify_strategy(row: dict[str, Any]) -> str:
     return "weak_or_rejected_for_now"
 
 
-def _classify_aggressive_filter(row: dict[str, Any], min_valid_count: int) -> str:
+def _classify_aggressive_filter(
+    row: dict[str, Any],
+    min_filter_sample_count: int,
+) -> str:
     window_count = int(row.get("valid_window_count") or 0)
     insufficient = int(row.get("insufficient_data_count") or 0)
     positive = int(row.get("positive_excess_window_count") or 0)
@@ -688,7 +696,7 @@ def _classify_aggressive_filter(row: dict[str, Any], min_valid_count: int) -> st
     left_tail = row.get("left_tail_reduction_ratio_mean")
     failure_max = row.get("failure_rate_below_minus_20pct_max")
 
-    if window_count < 2 or sample_min is None or sample_min < min_valid_count:
+    if window_count < 2 or sample_min is None or sample_min < min_filter_sample_count:
         return "sample_too_small"
     if insufficient >= math.ceil(window_count / 2):
         return "sample_too_small"
@@ -770,9 +778,12 @@ def _strategy_warnings(rows: list[dict[str, Any]], min_valid_count: int) -> list
     return warnings
 
 
-def _aggressive_warnings(rows: list[dict[str, Any]], min_valid_count: int) -> list[str]:
+def _aggressive_warnings(
+    rows: list[dict[str, Any]],
+    min_filter_sample_count: int,
+) -> list[str]:
     warnings = []
-    if any((_sample_count(row) or 0) < min_valid_count for row in rows):
+    if any((_sample_count(row) or 0) < min_filter_sample_count for row in rows):
         warnings.append("small_n_window")
     if any(row.get("validation_status") == "exploratory_same_period" for row in rows):
         warnings.append("exploratory_same_period")
