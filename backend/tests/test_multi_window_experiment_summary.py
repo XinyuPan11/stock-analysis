@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+
+import pandas as pd
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +15,7 @@ if str(SRC) not in sys.path:
 from stock_analysis.validation.multi_window_experiment_summary import (
     MultiWindowSummaryConfig,
     build_multi_window_experiment_summary,
+    render_multi_window_experiment_summary_markdown,
     write_multi_window_experiment_summary_outputs,
 )
 
@@ -196,6 +199,90 @@ def test_multi_window_summary_defaults_to_all_plan_ready_windows(tmp_path: Path)
     assert skipped[("2024-10-31", 20)]["status"] == "blocked_missing_as_of_outputs"
 
 
+def test_multi_window_summary_labels_low_coverage_comparison_windows(tmp_path: Path) -> None:
+    outputs_dir = tmp_path / "outputs"
+    experiments_dir = outputs_dir / "experiments"
+    experiments_dir.mkdir(parents=True)
+    plan_file = experiments_dir / "multi_asof_validation_plan_2024.json"
+    _write_plan(plan_file, [("2024-07-31", 60)])
+    _write_window(
+        experiments_dir,
+        "2024-07-31",
+        60,
+        excess=0.05,
+        sample=55,
+        prediction_count=300,
+        valid_prediction_count=55,
+    )
+
+    summary = build_multi_window_experiment_summary(
+        MultiWindowSummaryConfig(
+            outputs_dir=outputs_dir,
+            plan_file=plan_file,
+            min_valid_count=50,
+            min_coverage_rate=0.7,
+        )
+    )
+
+    ready = summary["ready_windows_used"][0]
+    assert ready["quality_status"] == "low_coverage"
+    assert ready["comparison_eligible"] is True
+    assert ready["high_quality_ready"] is False
+    assert ready["valid_prediction_count"] == 55
+    assert ready["prediction_count"] == 300
+    assert summary["summary"]["low_coverage_window_count"] == 1
+    markdown = render_multi_window_experiment_summary_markdown(summary)
+    assert "low_coverage" in markdown
+    assert "55/300" in markdown
+
+
+def test_multi_window_summary_excludes_low_valid_count_windows(tmp_path: Path) -> None:
+    outputs_dir = tmp_path / "outputs"
+    experiments_dir = outputs_dir / "experiments"
+    experiments_dir.mkdir(parents=True)
+    plan_file = experiments_dir / "multi_asof_validation_plan_2024.json"
+    _write_plan(plan_file, [("2024-07-31", 20), ("2024-07-31", 60)])
+    _write_window(
+        experiments_dir,
+        "2024-07-31",
+        20,
+        excess=0.50,
+        sample=5,
+        prediction_count=300,
+        valid_prediction_count=5,
+    )
+    _write_window(
+        experiments_dir,
+        "2024-07-31",
+        60,
+        excess=0.05,
+        sample=250,
+        prediction_count=300,
+        valid_prediction_count=250,
+    )
+
+    summary = build_multi_window_experiment_summary(
+        MultiWindowSummaryConfig(
+            outputs_dir=outputs_dir,
+            plan_file=plan_file,
+            min_valid_count=50,
+            min_coverage_rate=0.7,
+        )
+    )
+
+    ready_windows = {(row["as_of_date"], row["horizon_days"]) for row in summary["ready_windows_used"]}
+    assert ready_windows == {("2024-07-31", 60)}
+    excluded = summary["excluded_low_sample_windows"][0]
+    assert excluded["as_of_date"] == "2024-07-31"
+    assert excluded["horizon_days"] == 20
+    assert excluded["quality_status"] == "insufficient_valid_count"
+    assert excluded["comparison_eligible"] is False
+    strategy = summary["strategy_family_stability"][0]
+    assert strategy["valid_window_count"] == 1
+    assert strategy["average_excess_return_mean"] == 0.05
+
+
+
 def test_aggressive_filter_penalizes_small_n_and_right_tail_destruction(
     tmp_path: Path,
 ) -> None:
@@ -211,6 +298,8 @@ def test_aggressive_filter_penalizes_small_n_and_right_tail_destruction(
         excess=0.10,
         sample=8,
         right_tail=0.9,
+        prediction_count=30,
+        valid_prediction_count=30,
     )
     _write_window(
         experiments_dir,
@@ -219,6 +308,8 @@ def test_aggressive_filter_penalizes_small_n_and_right_tail_destruction(
         excess=0.08,
         sample=9,
         right_tail=0.9,
+        prediction_count=30,
+        valid_prediction_count=30,
     )
 
     summary = build_multi_window_experiment_summary(
@@ -331,6 +422,8 @@ def _write_window(
     excess: float,
     sample: int,
     right_tail: float = 0.9,
+    prediction_count: int | None = None,
+    valid_prediction_count: int | None = None,
 ) -> None:
     strategy_payload = {
         "summary": {
@@ -385,4 +478,24 @@ def _write_window(
         experiments_dir
         / f"aggressive_filter_experiments_{as_of_date}_{horizon_days}d.json"
     ).write_text(json.dumps(aggressive_payload), encoding="utf-8")
+
+    prediction_count = prediction_count if prediction_count is not None else sample
+    valid_prediction_count = (
+        valid_prediction_count if valid_prediction_count is not None else prediction_count
+    )
+    validation_dir = experiments_dir.parent / "validation"
+    validation_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "symbol": f"S{index:03d}",
+                "data_quality": "ok" if index < valid_prediction_count else "missing_price",
+                "future_return": 0.1 if index < valid_prediction_count else None,
+            }
+            for index in range(prediction_count)
+        ]
+    ).to_csv(
+        validation_dir / f"walk_forward_predictions_{as_of_date}_{horizon_days}d.csv",
+        index=False,
+    )
 
