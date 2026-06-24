@@ -40,6 +40,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--progress-log", default=None)
     parser.add_argument("--progress-every", type=int, default=100)
     parser.add_argument("--symbol-timeout-seconds", type=float, default=60.0)
+    parser.add_argument("--max-consecutive-symbol-timeouts", type=int, default=None)
+    parser.add_argument("--min-successful-factor-rows", type=int, default=1)
     return parser.parse_args(argv)
 
 
@@ -66,6 +68,8 @@ def main() -> int:
             progress_log_path=args.progress_log,
             progress_every=args.progress_every,
             symbol_timeout_seconds=args.symbol_timeout_seconds,
+            max_consecutive_symbol_timeouts=args.max_consecutive_symbol_timeouts,
+            min_successful_factor_rows=args.min_successful_factor_rows,
         ),
     )
 
@@ -86,6 +90,8 @@ def main() -> int:
         "progress_log": str(Path(args.progress_log).resolve()) if args.progress_log else "",
         "progress_every": args.progress_every,
         "symbol_timeout_seconds": args.symbol_timeout_seconds,
+        "max_consecutive_symbol_timeouts": args.max_consecutive_symbol_timeouts,
+        "min_successful_factor_rows": args.min_successful_factor_rows,
         "summary": result.summary,
         "fetch_errors": result.fetch_errors[:20],
         "candidates": _records(result.candidates),

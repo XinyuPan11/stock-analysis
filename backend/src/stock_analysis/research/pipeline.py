@@ -67,6 +67,8 @@ class ResearchPipelineConfig:
     progress_log_path: str | Path | None = None
     progress_every: int = 100
     symbol_timeout_seconds: float | None = 60.0
+    max_consecutive_symbol_timeouts: int | None = None
+    min_successful_factor_rows: int = 1
 
 
 @dataclass(frozen=True)
@@ -99,6 +101,10 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
 
     daily_frames: list[pd.DataFrame] = []
     fetch_errors: list[dict[str, str]] = []
+    consecutive_symbol_timeouts = 0
+    timeout_stopped_early = False
+    timeout_stop_reason = ""
+    timeout_skipped_count = 0
     symbols = limited_universe["symbol"].astype(str).tolist()
     progress("cache coverage / loading start", symbol_count=len(symbols), progress_every=config.progress_every)
     for index, symbol in enumerate(symbols, start=1):
@@ -128,8 +134,13 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
             error.setdefault("total", str(len(symbols)))
             error.setdefault("elapsed_seconds", str(round(elapsed, 4)))
             fetch_errors.append(error)
+            if error.get("error_type") in {"symbol_timeout", "timeout"}:
+                consecutive_symbol_timeouts += 1
+            else:
+                consecutive_symbol_timeouts = 0
         elif frame is not None:
             daily_frames.append(frame)
+            consecutive_symbol_timeouts = 0
         if debug_enabled or error or elapsed > 10.0:
             event = "SYMBOL_TIMEOUT" if error and error.get("error_type") == "symbol_timeout" else "SLOW_SYMBOL" if elapsed > 10.0 else "stock daily end"
             coverage_ok = debug.get("coverage_ok", "unknown")
@@ -157,9 +168,32 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
                 fetch_errors=len(fetch_errors),
                 last_symbol=symbol,
             )
+        if (
+            config.max_consecutive_symbol_timeouts is not None
+            and consecutive_symbol_timeouts >= config.max_consecutive_symbol_timeouts
+        ):
+            timeout_stopped_early = True
+            timeout_stop_reason = "max_consecutive_symbol_timeouts"
+            timeout_skipped_count = max(0, len(symbols) - index)
+            progress(
+                "timeout protection stop",
+                processed=index,
+                total=len(symbols),
+                consecutive_symbol_timeouts=consecutive_symbol_timeouts,
+                skipped_count=timeout_skipped_count,
+                max_consecutive_symbol_timeouts=config.max_consecutive_symbol_timeouts,
+            )
+            break
 
     all_daily = pd.concat(daily_frames, ignore_index=True) if daily_frames else pd.DataFrame()
-    progress("cache coverage / loading end", loaded_frames=len(daily_frames), rows=len(all_daily), fetch_errors=len(fetch_errors))
+    progress(
+        "cache coverage / loading end",
+        loaded_frames=len(daily_frames),
+        rows=len(all_daily),
+        fetch_errors=len(fetch_errors),
+        stopped_early=timeout_stopped_early,
+        skipped_count=timeout_skipped_count,
+    )
     progress("benchmark loading start", benchmark=config.benchmark)
     benchmark_frame = _fetch_benchmark(service, config, fetch_errors)
     progress("benchmark loading end", rows=len(benchmark_frame), fetch_errors=len(fetch_errors))
@@ -208,11 +242,15 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
         fetch_errors=fetch_errors,
         output_paths=output_paths,
         warnings=list(filter_result.warnings),
+        stopped_early=timeout_stopped_early,
+        stop_reason=timeout_stop_reason,
+        skipped_count=timeout_skipped_count,
     )
     progress("summary building end", fetch_error_count=len(fetch_errors), scored_count=len(candidates))
     if config.error_output_dir and fetch_errors:
         progress("fetch error writing start", error_count=len(fetch_errors), output_dir=str(Path(config.error_output_dir)))
         output_paths["failed_symbols_csv"] = _write_fetch_errors(fetch_errors, config.error_output_dir, config)
+        summary["failed_symbols_path"] = output_paths["failed_symbols_csv"]
         summary["output_paths"] = output_paths
         progress("fetch error writing end", path=output_paths["failed_symbols_csv"])
     if config.output_dir:
@@ -565,9 +603,15 @@ def _summary(
     fetch_errors: list[dict[str, str]],
     output_paths: dict[str, str],
     warnings: list[str],
+    stopped_early: bool = False,
+    stop_reason: str = "",
+    skipped_count: int = 0,
 ) -> dict[str, object]:
     output_path = output_paths.get("candidates_csv") or output_paths.get("candidates_json") or ""
+    timeout_count = sum(1 for error in fetch_errors if error.get("error_type") in {"symbol_timeout", "timeout"})
+    partial_success = bool(stopped_early and successful_factor_count >= config.min_successful_factor_rows)
     return {
+        "status": "partial_timeout_protected" if stopped_early else "ok",
         "as_of_date": pd.Timestamp(config.end_date).strftime("%Y-%m-%d"),
         "updated_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
         "provider": config.provider,
@@ -583,8 +627,17 @@ def _summary(
         "filtered_count": int(filter_result.stats.get("filtered_count", 0)),
         "attempted_count": int(attempted_count),
         "successful_factor_count": int(successful_factor_count),
+        "valid_factor_rows": int(successful_factor_count),
         "scored_count": int(scored_count),
         "fetch_error_count": int(len(fetch_errors)),
+        "timeout_count": int(timeout_count),
+        "skipped_count": int(skipped_count),
+        "stopped_early": bool(stopped_early),
+        "stop_reason": stop_reason,
+        "max_consecutive_symbol_timeouts": config.max_consecutive_symbol_timeouts,
+        "min_successful_factor_rows": int(config.min_successful_factor_rows),
+        "partial_success": partial_success,
+        "failed_symbols_path": output_paths.get("failed_symbols_csv", ""),
         "fetch_errors": fetch_errors,
         "output_path": output_path,
         "output_paths": output_paths,
@@ -715,6 +768,10 @@ def _validate_config(config: ResearchPipelineConfig) -> None:
         raise ValueError("progress_every must be positive.")
     if config.symbol_timeout_seconds is not None and config.symbol_timeout_seconds <= 0:
         raise ValueError("symbol_timeout_seconds must be positive when set.")
+    if config.max_consecutive_symbol_timeouts is not None and config.max_consecutive_symbol_timeouts <= 0:
+        raise ValueError("max_consecutive_symbol_timeouts must be positive when set.")
+    if config.min_successful_factor_rows < 0:
+        raise ValueError("min_successful_factor_rows cannot be negative.")
     start = pd.to_datetime(config.start_date, errors="coerce")
     end = pd.to_datetime(config.end_date, errors="coerce")
     if pd.isna(start) or pd.isna(end):

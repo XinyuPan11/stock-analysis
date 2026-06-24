@@ -87,6 +87,27 @@ class FakeTimeoutEligibleService(FakeResearchService):
         self.cache = FakeTimeoutCache(missing_symbols)
 
 
+class FakeConsecutiveTimeoutService(FakeResearchService):
+    def __init__(self) -> None:
+        super().__init__(
+            pd.DataFrame(
+                [
+                    _stock("AAA", "Alpha"),
+                    _stock("SLOW1", "Slow One"),
+                    _stock("SLOW2", "Slow Two"),
+                    _stock("LATE", "Late"),
+                ]
+            ),
+            {
+                "AAA": _prices("AAA", 1.5, amount=100_000_000, volume=10_000_000),
+                "LATE": _prices("LATE", 1.4, amount=100_000_000, volume=10_000_000),
+            },
+            _prices("CSI300", 1.0, amount=500_000_000, volume=50_000_000),
+        )
+        self.provider = FakeTimeoutProvider()
+        self.cache = FakeTimeoutCache({"SLOW1", "SLOW2"})
+
+
 class ResearchPipelineTests(unittest.TestCase):
     def test_pipeline_connects_universe_filter_factors_scoring_and_ranking(self) -> None:
         service = _service()
@@ -266,6 +287,57 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertIn("AAA", set(result.candidates["symbol"]))
         self.assertIn("SYMBOL_TIMEOUT", log_text)
 
+    def test_consecutive_symbol_timeouts_stop_early_and_report_partial_success(self) -> None:
+        service = FakeConsecutiveTimeoutService()
+        original = pipeline_module._fetch_stock_daily_with_provider_timeout
+
+        def fake_timeout_fetch(*, service, symbol, config, timeout_metadata):
+            return None, {
+                "symbol": symbol,
+                "stage": "provider_fetch",
+                "error_type": "symbol_timeout",
+                "error": "Symbol fetch timed out after 0.1s during provider_fetch.",
+                "attempts": "1",
+                "elapsed_seconds": "0.1",
+            }
+
+        pipeline_module._fetch_stock_daily_with_provider_timeout = fake_timeout_fetch
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                progress_log = Path(temp_dir, "daily_research_progress.log")
+                result = run_research_pipeline(
+                    service,
+                    _config(
+                        top_n=1,
+                        limit=4,
+                        output_dir=temp_dir,
+                        error_output_dir=temp_dir,
+                        progress_log_path=progress_log,
+                        progress_every=1,
+                        symbol_timeout_seconds=0.1,
+                        max_consecutive_symbol_timeouts=2,
+                        min_successful_factor_rows=1,
+                    ),
+                )
+                log_text = progress_log.read_text(encoding="utf-8")
+                failed_symbols_path = Path(result.summary["failed_symbols_path"])
+                failed_symbols_exists = failed_symbols_path.exists()
+                failed_symbols = pd.read_csv(failed_symbols_path)
+        finally:
+            pipeline_module._fetch_stock_daily_with_provider_timeout = original
+
+        self.assertEqual(result.summary["status"], "partial_timeout_protected")
+        self.assertEqual(result.summary["timeout_count"], 2)
+        self.assertEqual(result.summary["skipped_count"], 1)
+        self.assertTrue(result.summary["stopped_early"])
+        self.assertEqual(result.summary["stop_reason"], "max_consecutive_symbol_timeouts")
+        self.assertEqual(result.summary["valid_factor_rows"], 1)
+        self.assertTrue(result.summary["partial_success"])
+        self.assertTrue(failed_symbols_exists)
+        self.assertEqual(failed_symbols["symbol"].tolist(), ["SLOW1", "SLOW2"])
+        self.assertNotIn("LATE", service.stock_calls)
+        self.assertIn("timeout protection stop", log_text)
+
 
 def _config(
     top_n: int = 2,
@@ -277,6 +349,8 @@ def _config(
     progress_log_path: str | Path | None = None,
     progress_every: int = 100,
     symbol_timeout_seconds: float | None = 60.0,
+    max_consecutive_symbol_timeouts: int | None = None,
+    min_successful_factor_rows: int = 1,
 ) -> ResearchPipelineConfig:
     return ResearchPipelineConfig(
         start_date="2023-01-01",
@@ -292,6 +366,8 @@ def _config(
         progress_log_path=progress_log_path,
         progress_every=progress_every,
         symbol_timeout_seconds=symbol_timeout_seconds,
+        max_consecutive_symbol_timeouts=max_consecutive_symbol_timeouts,
+        min_successful_factor_rows=min_successful_factor_rows,
     )
 
 
