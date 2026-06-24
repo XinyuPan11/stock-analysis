@@ -116,6 +116,29 @@ class ControlledAsOfRecoveryTests(unittest.TestCase):
             self.assertEqual(result["missing_price_symbols_count"], 1)
             self.assertTrue(result["missing_price_symbols_file_written"])
 
+    def test_low_coverage_limit_expansion_reports_incomplete_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            outputs = root / "outputs"
+            _write_as_of_outputs(outputs)
+            _write_predictions(outputs)
+            _write_symbols(outputs, ["AAA", "BBB", "CCC", "DDD"])
+            _write_cache_prices(root / "cache", ["AAA", "BBB"])
+
+            result = diagnose_controlled_2024_10_31_20d_recovery(
+                _config(root, min_valid_count=2)
+            )
+
+            self.assertEqual(result["status"], "expansion_incomplete_low_coverage")
+            self.assertEqual(result["root_cause"], "missing_price_future_cache_coverage")
+            self.assertEqual(result["diagnostic_interpretation"], "timeout_protection_succeeded_limit_300_incomplete_due_to_missing_price_future_cache")
+            self.assertEqual(result["missing_price_symbols_count"], 1)
+            self.assertEqual(result["insufficient_future_window_count"], 1)
+            self.assertIn("limit_300_expansion_incomplete_due_to_missing_price_coverage", result["notes"])
+            self.assertTrue(
+                any("prewarm_market_cache.py" in command for command in result["next_manual_commands"])
+            )
+
     def test_missing_core_outputs_still_recommends_controlled_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

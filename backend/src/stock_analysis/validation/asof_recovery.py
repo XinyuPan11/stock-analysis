@@ -74,8 +74,12 @@ def diagnose_controlled_2024_10_31_20d_recovery(
         status = "missing_symbols_file"
         root_cause = "symbols_file_missing"
     elif cache_details.get("coverage_rate") is not None and float(cache_details.get("coverage_rate") or 0.0) < config.min_coverage_rate:
-        status = "missing_cache"
-        root_cause = "cache_coverage_below_threshold"
+        if int(prediction_details.get("prediction_count") or 0) >= int(config.min_valid_count) and int(prediction_details.get("missing_price_count") or 0) > 0:
+            status = "expansion_incomplete_low_coverage"
+            root_cause = "missing_price_future_cache_coverage"
+        else:
+            status = "missing_cache"
+            root_cause = "cache_coverage_below_threshold"
     elif core_missing_outputs:
         status = "missing_core_validation_outputs"
         root_cause = "core_validation_outputs_missing"
@@ -147,8 +151,9 @@ def diagnose_controlled_2024_10_31_20d_recovery(
             "missing": experiment_missing_outputs,
         },
         "cache_coverage": cache_details,
+        "diagnostic_interpretation": _diagnostic_interpretation(status),
         "next_manual_commands": _next_manual_commands(config, status, missing_as_of_outputs, missing_price_details, future_window),
-        "notes": _notes(status, future_recoverable, missing_as_of_outputs),
+        "notes": _notes(status, future_recoverable, missing_as_of_outputs, prediction_details),
     }
     if config.write_output:
         payload["output_file"] = write_controlled_asof_recovery_diagnostic(payload, outputs_dir)
@@ -446,7 +451,7 @@ def _next_manual_commands(
             ]
         )
         return commands
-    if status in {"missing_symbols_file", "missing_cache"}:
+    if status in {"missing_symbols_file", "missing_cache", "expansion_incomplete_low_coverage"}:
         commands.append(
             _script_command("generate_multi_asof_validation_plan.py")
             + f"--outputs-dir {config.outputs_dir} --cache-dir {config.cache_dir} "
@@ -490,10 +495,17 @@ def _script_command(script_name: str) -> str:
     return "python backend\\scripts\\" + script_name + " "
 
 
+def _diagnostic_interpretation(status: str) -> str:
+    if status == "expansion_incomplete_low_coverage":
+        return "timeout_protection_succeeded_limit_300_incomplete_due_to_missing_price_future_cache"
+    return status
+
+
 def _notes(
     status: str,
     future_recoverable: bool,
     missing_as_of_outputs: dict[str, Any],
+    prediction_details: dict[str, Any],
 ) -> list[str]:
     notes = [
         "diagnostic_only_no_provider_access",
@@ -507,6 +519,11 @@ def _notes(
         notes.append("run_controlled_validation_batch_after_cache_coverage_is_ready")
     if status == "recovered_core_outputs_missing_experiments":
         notes.append("core_validation_recovered_optional_experiments_missing")
+    if status == "expansion_incomplete_low_coverage":
+        notes.append("limit_300_expansion_incomplete_due_to_missing_price_coverage")
+        if int(prediction_details.get("insufficient_future_window_count") or 0) == 0:
+            notes.append("insufficient_future_window_not_observed")
+        notes.append("no_2025_data_required")
     return notes
 
 

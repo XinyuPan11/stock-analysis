@@ -48,6 +48,49 @@ failed_symbols_path
 Partial success means the recovery run produced enough valid factor rows for a
 controlled follow-up decision. It does not mean the validation quality is final.
 
+
+## Actual Manual Result
+
+Phase 2.8.8 achieved the timeout-protection objective:
+
+```text
+2024-10-31 20d limit 300 daily research timeout protection works
+symbols_file_symbol_count = 300
+prediction_count = 300
+required_future_end_date = 2024-12-10
+insufficient_future_window_count = 0
+no 2025 data needed
+```
+
+The remaining bottleneck is not scoring, ranking, factor calculation, validation
+math, or future-window length. It is future-price cache coverage:
+
+```text
+valid_future_count = 58
+missing_price_count = 245 before targeted chunk prewarm
+missing_price_count = 242 after chunk_02 prewarm
+valid_coverage_ratio ~= 0.1933
+```
+
+Manual chunked missing-price prewarm is inefficient for this window. In the
+observed chunk_02 run, 30 symbols were attempted but only 3 validation
+`missing_price` symbols recovered after many BaoStock login/logout cycles, and
+the process can stall.
+
+The diagnostic status for this condition is:
+
+```text
+status = expansion_incomplete_low_coverage
+root_cause = missing_price_future_cache_coverage
+```
+
+If an older diagnostic returns `missing_cache`, interpret it the same way for
+this Phase 2.8.8 limit 300 result: timeout protection succeeded, but limit 300
+validation remains incomplete because future-price cache coverage is too low.
+
+Recommended next phase: Phase 2.8.9 / Phase 2.9 should focus on prewarm timeout
+protection or a raw cache catch-up pipeline for targeted future-price windows.
+
 ## Manual Commands
 
 Optional controlled prewarm for the 2024-10-31 as-of lookback window:
@@ -159,10 +202,15 @@ failed_symbols_path
 Review validation missing-price export fields:
 
 ```text
+status
+root_cause
+diagnostic_interpretation
 missing_price_symbols_count
 missing_price_symbols_file
 missing_price_symbols_file_written
 missing_price_prewarm_command
+insufficient_future_window_count
+required_future_end_date
 ```
 
 If `partial_success = true`, continue with review, retry-only prewarm, and then
