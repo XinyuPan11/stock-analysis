@@ -59,6 +59,7 @@ def diagnose_controlled_2024_10_31_20d_recovery(
 
     symbol_details = _candidate_symbols(outputs_dir, limit=config.limit)
     prediction_details = _prediction_quality_details(outputs_dir, config)
+    missing_price_details = _missing_price_symbol_export(outputs_dir, future_window, write_output=config.write_output)
     symbols_file = _symbols_file(outputs_dir)
     cache_details = _cache_details(config, symbols_file, future_window)
     future_recoverable = str(future_window.get("end_date")) <= TARGET_YEAR_END
@@ -123,6 +124,10 @@ def diagnose_controlled_2024_10_31_20d_recovery(
         "prediction_count": prediction_details["prediction_count"],
         "valid_coverage_ratio": prediction_details["valid_coverage_ratio"],
         "missing_price_count": prediction_details["missing_price_count"],
+        "missing_price_symbols_count": missing_price_details["count"],
+        "missing_price_symbols_file": missing_price_details["path"],
+        "missing_price_symbols_file_written": missing_price_details["written"],
+        "missing_price_prewarm_command": _missing_price_prewarm_command(config, missing_price_details["path"], future_window) if missing_price_details["count"] else "",
         "insufficient_future_window_count": prediction_details["insufficient_future_window_count"],
         "data_quality_counts": prediction_details["data_quality_counts"],
         "quality_status": prediction_details["quality_status"],
@@ -142,7 +147,7 @@ def diagnose_controlled_2024_10_31_20d_recovery(
             "missing": experiment_missing_outputs,
         },
         "cache_coverage": cache_details,
-        "next_manual_commands": _next_manual_commands(config, status, missing_as_of_outputs),
+        "next_manual_commands": _next_manual_commands(config, status, missing_as_of_outputs, missing_price_details, future_window),
         "notes": _notes(status, future_recoverable, missing_as_of_outputs),
     }
     if config.write_output:
@@ -322,6 +327,45 @@ def _prediction_quality_details(
     }
 
 
+def _missing_price_symbol_export(
+    outputs_dir: Path,
+    future_window: dict[str, Any],
+    *,
+    write_output: bool,
+) -> dict[str, Any]:
+    path = _missing_price_symbols_file(outputs_dir)
+    predictions_path = outputs_dir / "validation" / f"walk_forward_predictions_{TARGET_AS_OF_DATE}_{TARGET_HORIZON_DAYS}d.csv"
+    rows: list[dict[str, Any]] = []
+    if predictions_path.exists():
+        frame = pd.read_csv(predictions_path, dtype={"symbol": str, "data_quality": str})
+        if "data_quality" in frame.columns and "symbol" in frame.columns:
+            missing = frame[frame["data_quality"].fillna("").astype(str) == "missing_price"]
+            symbols = _dedupe(missing["symbol"].dropna().astype(str).tolist())
+            rows = [
+                {
+                    "symbol": symbol,
+                    "reason": "missing_price",
+                    "as_of_date": TARGET_AS_OF_DATE,
+                    "horizon_days": TARGET_HORIZON_DAYS,
+                    "future_window_start": str(future_window.get("start_date", "")),
+                    "future_window_end": str(future_window.get("end_date", "")),
+                }
+                for symbol in symbols
+            ]
+    if write_output and rows:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(path, index=False, encoding="utf-8-sig")
+    return {
+        "path": str(path),
+        "count": len(rows),
+        "written": bool(write_output and rows and path.exists()),
+    }
+
+
+def _missing_price_symbols_file(outputs_dir: Path) -> Path:
+    return outputs_dir / "cache_plans" / f"missing_price_symbols_{TARGET_AS_OF_DATE}_{TARGET_HORIZON_DAYS}d.csv"
+
+
 def _cache_details(
     config: ControlledAsOfRecoveryConfig,
     symbols_file: Path,
@@ -380,6 +424,8 @@ def _next_manual_commands(
     config: ControlledAsOfRecoveryConfig,
     status: str,
     missing_as_of_outputs: dict[str, Any],
+    missing_price_details: dict[str, Any],
+    future_window: dict[str, Any],
 ) -> list[str]:
     outputs_dir = Path(config.outputs_dir)
     commands: list[str] = []
@@ -425,7 +471,19 @@ def _next_manual_commands(
                 + f"--outputs-dir {config.outputs_dir} --write-output",
             ]
         )
+    if missing_price_details.get("count"):
+        commands.append(_missing_price_prewarm_command(config, str(missing_price_details.get("path", "")), future_window))
     return commands
+
+
+def _missing_price_prewarm_command(config: ControlledAsOfRecoveryConfig, symbols_file: str, future_window: dict[str, Any]) -> str:
+    return (
+        _script_command("prewarm_market_cache.py")
+        + f"--provider {config.provider} --start-date {TARGET_AS_OF_DATE} "
+        + f"--end-date {future_window.get('end_date')} --cache-dir {config.cache_dir} "
+        + "--output-dir outputs\\cache "
+        + f"--symbols-file {symbols_file} --batch-size 5 --sleep-seconds 1.0 --retry 1 --resume --max-errors 20"
+    )
 
 
 def _script_command(script_name: str) -> str:

@@ -61,6 +61,11 @@ class ControlledAsOfRecoveryTests(unittest.TestCase):
             self.assertEqual(result["prediction_count"], 4)
             self.assertEqual(result["valid_future_count"], 2)
             self.assertEqual(result["missing_price_count"], 1)
+            self.assertEqual(result["missing_price_symbols_count"], 1)
+            self.assertIn("missing_price_symbols_2024-10-31_20d.csv", result["missing_price_symbols_file"])
+            self.assertFalse(result["missing_price_symbols_file_written"])
+            self.assertIn("prewarm_market_cache.py", result["missing_price_prewarm_command"])
+            self.assertIn("--symbols-file", result["missing_price_prewarm_command"])
             self.assertEqual(result["insufficient_future_window_count"], 1)
             self.assertEqual(result["quality_status"], "low_coverage")
             self.assertTrue(result["comparison_eligible"])
@@ -78,6 +83,38 @@ class ControlledAsOfRecoveryTests(unittest.TestCase):
             self.assertTrue(
                 any("run_strategy_family_experiments.py" in command for command in result["next_manual_commands"])
             )
+            self.assertTrue(
+                any("missing_price_symbols_2024-10-31_20d.csv" in command for command in result["next_manual_commands"])
+            )
+
+    def test_write_output_exports_missing_price_symbols_for_targeted_prewarm(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            outputs = root / "outputs"
+            _write_as_of_outputs(outputs)
+            _write_predictions(outputs)
+            _write_symbols(outputs, ["AAA", "BBB", "CCC", "DDD"])
+            _write_cache_prices(root / "cache", ["AAA", "BBB", "CCC", "DDD"])
+
+            result = diagnose_controlled_2024_10_31_20d_recovery(
+                _config(root, min_valid_count=2, write_output=True)
+            )
+
+            missing_path = Path(result["missing_price_symbols_file"])
+            self.assertTrue(missing_path.exists())
+            exported = pd.read_csv(missing_path)
+            self.assertEqual(exported.to_dict(orient="records"), [
+                {
+                    "symbol": "CCC",
+                    "reason": "missing_price",
+                    "as_of_date": "2024-10-31",
+                    "horizon_days": 20,
+                    "future_window_start": "2024-11-01",
+                    "future_window_end": "2024-12-10",
+                }
+            ])
+            self.assertEqual(result["missing_price_symbols_count"], 1)
+            self.assertTrue(result["missing_price_symbols_file_written"])
 
     def test_missing_core_outputs_still_recommends_controlled_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -103,6 +140,7 @@ def _config(
     root: Path,
     *,
     min_valid_count: int = 50,
+    write_output: bool = False,
 ) -> ControlledAsOfRecoveryConfig:
     return ControlledAsOfRecoveryConfig(
         outputs_dir=root / "outputs",
@@ -110,6 +148,7 @@ def _config(
         limit=300,
         min_valid_count=min_valid_count,
         min_coverage_rate=0.7,
+        write_output=write_output,
     )
 
 

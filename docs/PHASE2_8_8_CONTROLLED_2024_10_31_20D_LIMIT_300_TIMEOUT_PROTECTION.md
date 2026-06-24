@@ -86,6 +86,30 @@ Rerun controlled validation at limit 300:
 python backend\scripts\run_controlled_validation_batch.py --as-of-date 2024-10-31 --horizon-days 20 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 300 --write-output
 ```
 
+Export validation `missing_price` symbols for targeted future-cache prewarm:
+
+```powershell
+python backend\scripts\diagnose_2024_10_31_20d_asof_recovery.py --outputs-dir outputs --cache-dir data\cache\daily-use --limit 300 --write-output
+```
+
+This writes:
+
+```text
+outputs/cache_plans/missing_price_symbols_2024-10-31_20d.csv
+```
+
+Targeted future-cache prewarm for validation `missing_price` symbols only:
+
+```powershell
+python backend\scripts\prewarm_market_cache.py --provider baostock --start-date 2024-10-31 --end-date 2024-12-10 --cache-dir data\cache\daily-use --output-dir outputs\cache --symbols-file outputs\cache_plans\missing_price_symbols_2024-10-31_20d.csv --batch-size 5 --sleep-seconds 1.0 --retry 1 --resume --max-errors 20
+```
+
+Rerun controlled validation after the targeted future-cache prewarm:
+
+```powershell
+python backend\scripts\run_controlled_validation_batch.py --as-of-date 2024-10-31 --horizon-days 20 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 300 --write-output
+```
+
 Regenerate optional experiment outputs:
 
 ```powershell
@@ -106,6 +130,7 @@ outputs/daily/summary_2024-10-31.json
 outputs/daily/factors_2024-10-31.csv
 outputs/errors/failed_symbols_2024-10-31.csv
 outputs/cache/cache_prewarm_summary_2024-10-31.json
+outputs/cache_plans/missing_price_symbols_2024-10-31_20d.csv
 outputs/validation/walk_forward_predictions_2024-10-31_20d.csv
 outputs/validation/list_performance_2024-10-31_20d.json
 outputs/validation/factor_effectiveness_2024-10-31_20d.json
@@ -121,7 +146,7 @@ It means the run stopped before more slow provider calls could stall the
 recovery, while preserving partial daily outputs and a retryable failed-symbols
 file.
 
-Review:
+Review daily-research timeout fields:
 
 ```text
 timeout_count
@@ -129,6 +154,15 @@ skipped_count
 valid_factor_rows
 partial_success
 failed_symbols_path
+```
+
+Review validation missing-price export fields:
+
+```text
+missing_price_symbols_count
+missing_price_symbols_file
+missing_price_symbols_file_written
+missing_price_prewarm_command
 ```
 
 If `partial_success = true`, continue with review, retry-only prewarm, and then
