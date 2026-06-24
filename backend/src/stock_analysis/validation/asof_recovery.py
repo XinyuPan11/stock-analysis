@@ -486,10 +486,13 @@ def _missing_price_prewarm_command(config: ControlledAsOfRecoveryConfig, symbols
         _script_command("prewarm_market_cache.py")
         + f"--provider {config.provider} --start-date {TARGET_AS_OF_DATE} "
         + f"--end-date {future_window.get('end_date')} --cache-dir {config.cache_dir} "
-        + "--output-dir outputs\\cache "
-        + f"--symbols-file {symbols_file} --batch-size 5 --sleep-seconds 1.0 --retry 1 --resume --max-errors 20"
+        + "--output-dir outputs\cache "
+        + f"--symbols-file {symbols_file} --limit 30 --offset CHUNK_OFFSET "
+        + "--batch-size 5 --sleep-seconds 1.0 --retry 1 --resume --max-errors 20 "
+        + "--symbol-timeout-seconds 20 --max-consecutive-symbol-timeouts 3 "
+        + "--failed-symbols-output outputs\cache\missing_price_prewarm_failed_2024-10-31_20d_CHUNK_ID.csv "
+        + "--progress-log outputs\cache\missing_price_prewarm_2024-10-31_20d_CHUNK_ID.jsonl"
     )
-
 
 def _script_command(script_name: str) -> str:
     return "python backend\\scripts\\" + script_name + " "

@@ -66,6 +66,11 @@ class ControlledAsOfRecoveryTests(unittest.TestCase):
             self.assertFalse(result["missing_price_symbols_file_written"])
             self.assertIn("prewarm_market_cache.py", result["missing_price_prewarm_command"])
             self.assertIn("--symbols-file", result["missing_price_prewarm_command"])
+            self.assertIn("--symbol-timeout-seconds", result["missing_price_prewarm_command"])
+            self.assertIn("--max-consecutive-symbol-timeouts", result["missing_price_prewarm_command"])
+            self.assertIn("--failed-symbols-output", result["missing_price_prewarm_command"])
+            self.assertIn("--progress-log", result["missing_price_prewarm_command"])
+            self.assertIn("CHUNK_OFFSET", result["missing_price_prewarm_command"])
             self.assertEqual(result["insufficient_future_window_count"], 1)
             self.assertEqual(result["quality_status"], "low_coverage")
             self.assertTrue(result["comparison_eligible"])
@@ -139,6 +144,35 @@ class ControlledAsOfRecoveryTests(unittest.TestCase):
                 any("prewarm_market_cache.py" in command for command in result["next_manual_commands"])
             )
 
+
+    def test_full_coverage_with_experiments_reports_recovered_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            outputs = root / "outputs"
+            _write_as_of_outputs(outputs)
+            _write_full_quality_predictions(outputs)
+            _write_experiment_outputs(outputs)
+            _write_symbols(outputs, ["AAA", "BBB", "CCC", "DDD"])
+            _write_cache_prices(root / "cache", ["AAA", "BBB", "CCC", "DDD"])
+
+            result = diagnose_controlled_2024_10_31_20d_recovery(
+                _config(root, min_valid_count=2)
+            )
+
+            self.assertEqual(result["status"], "recovered_valid")
+            self.assertEqual(result["root_cause"], "none")
+            self.assertEqual(result["quality_status"], "high_quality")
+            self.assertTrue(result["comparison_eligible"])
+            self.assertTrue(result["high_quality_ready"])
+            self.assertEqual(result["prediction_count"], 4)
+            self.assertEqual(result["valid_future_count"], 4)
+            self.assertEqual(result["valid_coverage_ratio"], 1.0)
+            self.assertEqual(result["missing_price_count"], 0)
+            self.assertEqual(result["missing_price_symbols_count"], 0)
+            self.assertEqual(result["missing_price_prewarm_command"], "")
+            self.assertEqual(result["experiment_outputs"]["missing"], {})
+            self.assertNotIn("limit_300_expansion_incomplete_due_to_missing_price_coverage", result["notes"])
+
     def test_missing_core_outputs_still_recommends_controlled_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -208,6 +242,40 @@ def _write_predictions(outputs: Path) -> None:
     )
     (validation / "factor_effectiveness_2024-10-31_20d.json").write_text(
         json.dumps({"status": "ok", "factors": []}),
+        encoding="utf-8",
+    )
+
+
+def _write_full_quality_predictions(outputs: Path) -> None:
+    validation = outputs / "validation"
+    validation.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {"symbol": "AAA", "future_return": 0.10, "data_quality": "ok"},
+            {"symbol": "BBB", "future_return": 0.05, "data_quality": "ok"},
+            {"symbol": "CCC", "future_return": 0.04, "data_quality": "ok"},
+            {"symbol": "DDD", "future_return": 0.03, "data_quality": "ok"},
+        ]
+    ).to_csv(validation / "walk_forward_predictions_2024-10-31_20d.csv", index=False)
+    (validation / "list_performance_2024-10-31_20d.json").write_text(
+        json.dumps({"status": "ok", "lists": []}),
+        encoding="utf-8",
+    )
+    (validation / "factor_effectiveness_2024-10-31_20d.json").write_text(
+        json.dumps({"status": "ok", "factors": []}),
+        encoding="utf-8",
+    )
+
+
+def _write_experiment_outputs(outputs: Path) -> None:
+    experiments = outputs / "experiments"
+    experiments.mkdir(parents=True, exist_ok=True)
+    (experiments / "strategy_family_experiments_2024-10-31_20d.json").write_text(
+        json.dumps({"status": "ok", "results": []}),
+        encoding="utf-8",
+    )
+    (experiments / "aggressive_filter_experiments_2024-10-31_20d.json").write_text(
+        json.dumps({"status": "ok", "results": []}),
         encoding="utf-8",
     )
 

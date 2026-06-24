@@ -52,10 +52,46 @@ On a symbol timeout the tool skips that symbol, records a retryable failed row,
 preserves any cache files already written, and continues until the consecutive
 symbol-timeout cap or max-error cap is reached.
 
+
+## Final Manual Result
+
+Phase 2.8.9 succeeded completely for the controlled 2024-10-31 20d limit 300 recovery:
+
+```text
+symbols_file_symbol_count = 300
+prediction_count = 300
+valid_future_count = 300
+valid_coverage_ratio = 1.0
+missing_price_count = 0
+missing_price_symbols_count = 0
+insufficient_future_window_count = 0
+required_future_end_date = 2024-12-10
+data_quality_counts = {"ok": 300}
+```
+
+Coverage progression:
+
+```text
+initial = 55 / 300 = 0.1833
+after_controlled_missing_price_recovery = 300 / 300 = 1.0
+```
+
+Final diagnostic interpretation:
+
+```text
+status = recovered_valid
+quality_status = high_quality
+high_quality_ready = true
+root_cause = none
+```
+
+The issue was future-price cache coverage, not scoring, ranking, factor formulas,
+or validation math. No 2025 data was required, and
+`insufficient_future_window_count` remained `0`.
+
 ## Safe Missing-Price Recovery Command
 
-Run missing-price recovery in small chunks. This first chunk stays fully inside
-late 2024 and does not touch 2025:
+Run missing-price recovery in small chunks. These commands are templates: replace `CHUNK_ID` / `CHUNK_OFFSET`, or use concrete names such as `chunk01` / `0`. The first chunk stays fully inside late 2024 and does not touch 2025:
 
 ```powershell
 python backend\scripts\prewarm_market_cache.py --provider baostock --start-date 2024-10-31 --end-date 2024-12-10 --cache-dir data\cache\daily-use --output-dir outputs\cache --symbols-file outputs\cache_plans\missing_price_symbols_2024-10-31_20d.csv --limit 30 --offset 0 --batch-size 5 --sleep-seconds 1.0 --retry 1 --resume --max-errors 20 --symbol-timeout-seconds 20 --max-consecutive-symbol-timeouts 3 --failed-symbols-output outputs\cache\missing_price_prewarm_failed_2024-10-31_20d_chunk01.csv --progress-log outputs\cache\missing_price_prewarm_2024-10-31_20d_chunk01.jsonl
@@ -66,6 +102,8 @@ Next chunks only change `--offset` and output filenames, for example chunk 02:
 ```powershell
 python backend\scripts\prewarm_market_cache.py --provider baostock --start-date 2024-10-31 --end-date 2024-12-10 --cache-dir data\cache\daily-use --output-dir outputs\cache --symbols-file outputs\cache_plans\missing_price_symbols_2024-10-31_20d.csv --limit 30 --offset 30 --batch-size 5 --sleep-seconds 1.0 --retry 1 --resume --max-errors 20 --symbol-timeout-seconds 20 --max-consecutive-symbol-timeouts 3 --failed-symbols-output outputs\cache\missing_price_prewarm_failed_2024-10-31_20d_chunk02.csv --progress-log outputs\cache\missing_price_prewarm_2024-10-31_20d_chunk02.jsonl
 ```
+
+Diagnostic `missing_price_prewarm_command` is also emitted as a protected template with `CHUNK_ID` and `CHUNK_OFFSET` placeholders so chunk output names can vary safely.
 
 Retry only a failed chunk after reviewing the failed-symbols CSV:
 
@@ -119,7 +157,7 @@ protection, not a scoring failure. It means the cache recovery preserved prior
 successes, recorded retryable symbols, and avoided another long stall.
 
 The desired validation improvement is a lower `missing_price_count` and a higher
-`valid_future_count`. If coverage remains low, the correct conclusion is still:
+`valid_future_count`. The final controlled result reached full coverage. If a future rerun remains low coverage, the correct conclusion is still:
 
 ```text
 root_cause = missing_price_future_cache_coverage
