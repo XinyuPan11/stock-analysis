@@ -18,18 +18,52 @@ The checker prints JSON and, with `--write-output`, writes:
 outputs/experiments/window_readiness_<as_of_date>_<horizon>d.json
 ```
 
-## Status Values
+## Status Model
 
-- `ready`: cache coverage and validation quality gates pass, and required
-  validation/experiment outputs exist.
+Phase 2.8.6.1 separates execution readiness from validation quality so summary
+and checker use the same terminology.
+
+`execution_status` values:
+
 - `blocked_missing_as_of_outputs`: as-of labels/factors/lists are missing.
 - `deferred`: the future window crosses 2025.
-- `missing_cache`: symbols file is missing or cache coverage is below the
-  configured threshold.
-- `missing_experiment_outputs`: cache is sufficient, but validation or
-  experiment outputs are missing.
-- `low_quality`: validation outputs exist but valid prediction count or valid
-  prediction ratio is below configured thresholds.
+- `missing_symbols_file`: the required cache-plan symbols file is missing.
+- `missing_cache`: symbols file exists, but cache coverage is below threshold.
+- `missing_experiment_outputs`: cache is sufficient, but validation or experiment outputs are missing.
+- `executable_ready`: required files exist and the window can be reviewed.
+
+`quality_status` values:
+
+- `high_quality`: valid prediction count and valid ratio meet thresholds.
+- `low_coverage`: valid prediction count is sufficient, but valid ratio is below threshold.
+- `insufficient_valid_count`: valid prediction count is below threshold.
+- `missing_validation_outputs`: walk-forward prediction output is missing.
+- `unknown`: execution is blocked before quality can be measured.
+
+The checker also reports:
+
+- `comparison_eligible`: true only when `valid_prediction_count >= min_valid_count`.
+- `high_quality_ready`: true only when `comparison_eligible` is true and valid ratio is at least `min_coverage_rate`.
+
+The legacy `status` field remains for compatibility. It maps high-quality
+executable windows to `ready`, low-coverage or insufficient executable windows
+to `low_quality`, and blocked/deferred windows to their execution status.
+
+Default quality thresholds:
+
+```text
+min_valid_count = 50
+min_coverage_rate = 0.7
+```
+
+Example interpretation for `2024-07-31 60d` with `55/300` valid predictions:
+
+```text
+execution_status = executable_ready
+quality_status = low_coverage
+comparison_eligible = true
+high_quality_ready = false
+```
 
 ## 2024-10-31 20d Example
 

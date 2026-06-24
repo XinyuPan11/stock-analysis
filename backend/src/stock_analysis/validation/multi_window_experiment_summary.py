@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 import math
+
+import pandas as pd
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
 from typing import Any
+
+from stock_analysis.validation.window_readiness import classify_validation_quality
 
 
 DEFAULT_WINDOWS: tuple[tuple[str, int], ...] = (
@@ -45,7 +49,8 @@ class MultiWindowSummaryConfig:
     outputs_dir: Path
     plan_file: Path
     windows: tuple[tuple[str, int], ...] | None = None
-    min_valid_count: int = 10
+    min_valid_count: int = 50
+    min_coverage_rate: float = 0.7
 
 
 @dataclass
@@ -73,6 +78,7 @@ def build_multi_window_experiment_summary(config: MultiWindowSummaryConfig) -> d
 
     ready_windows: list[dict[str, Any]] = []
     missing_windows: list[dict[str, Any]] = []
+    excluded_low_sample_windows: list[dict[str, Any]] = []
     strategy_rows: list[dict[str, Any]] = []
     aggressive_rows: list[dict[str, Any]] = []
     source_files: list[str] = []
@@ -81,6 +87,13 @@ def build_multi_window_experiment_summary(config: MultiWindowSummaryConfig) -> d
 
     for as_of_date, horizon_days in selected_windows:
         window = _window_files(experiments_dir, as_of_date, horizon_days, plan_lookup)
+        quality = _window_quality(
+            outputs_dir,
+            as_of_date,
+            horizon_days,
+            config.min_valid_count,
+            config.min_coverage_rate,
+        )
         missing: list[str] = []
         if not window.strategy_file.exists():
             missing.append(str(window.strategy_file))
@@ -96,6 +109,24 @@ def build_multi_window_experiment_summary(config: MultiWindowSummaryConfig) -> d
                     "plan_status": window.plan_status,
                     "plan_ready": window.plan_ready,
                     "missing_files": missing,
+                    **quality,
+                }
+            )
+            continue
+
+        if not quality["comparison_eligible"]:
+            excluded_low_sample_windows.append(
+                {
+                    "as_of_date": as_of_date,
+                    "horizon_days": horizon_days,
+                    "window_id": window.window_id,
+                    "status": quality["quality_status"],
+                    "reason": _quality_exclusion_reason(quality),
+                    "plan_status": window.plan_status,
+                    "plan_ready": window.plan_ready,
+                    "strategy_file": str(window.strategy_file),
+                    "aggressive_file": str(window.aggressive_file),
+                    **quality,
                 }
             )
             continue
@@ -113,14 +144,15 @@ def build_multi_window_experiment_summary(config: MultiWindowSummaryConfig) -> d
                 "plan_ready": window.plan_ready,
                 "strategy_file": str(window.strategy_file),
                 "aggressive_file": str(window.aggressive_file),
+                **quality,
             }
         )
         strategy_rows.extend(
-            _with_window(row, as_of_date, horizon_days, window.window_id)
+            _with_window(row, as_of_date, horizon_days, window.window_id, quality)
             for row in strategy_payload.get("strategy_family_results", [])
         )
         aggressive_rows.extend(
-            _with_window(row, as_of_date, horizon_days, window.window_id)
+            _with_window(row, as_of_date, horizon_days, window.window_id, quality)
             for row in aggressive_payload.get("aggressive_filter_results", [])
         )
 
@@ -142,6 +174,17 @@ def build_multi_window_experiment_summary(config: MultiWindowSummaryConfig) -> d
         warnings.append(
             f"{exploratory_count} aggressive filter rows are exploratory_same_period."
         )
+    low_coverage_windows = [
+        row for row in ready_windows if row.get("quality_status") != "high_quality"
+    ]
+    if low_coverage_windows:
+        warnings.append(
+            "Some comparison-eligible windows are exploratory because quality_status is not high_quality."
+        )
+    if excluded_low_sample_windows:
+        warnings.append(
+            "Some plan-ready windows were excluded from aggregate metrics because valid prediction count is below threshold."
+        )
     if missing_windows:
         warnings.append("Some plan windows were excluded or are missing experiment outputs.")
 
@@ -155,7 +198,11 @@ def build_multi_window_experiment_summary(config: MultiWindowSummaryConfig) -> d
             "full_workflow_executed": False,
             "no_future_leakage": True,
             "min_valid_count": config.min_valid_count,
+            "min_coverage_rate": config.min_coverage_rate,
             "ready_window_count": len(ready_windows),
+            "high_quality_window_count": sum(1 for row in ready_windows if row.get("high_quality_ready")),
+            "low_coverage_window_count": sum(1 for row in ready_windows if row.get("quality_status") == "low_coverage"),
+            "low_sample_window_count": len(excluded_low_sample_windows),
             "missing_window_count": len(missing_windows),
             "strategy_family_count": len(strategy_summary),
             "aggressive_filter_count": len(aggressive_summary),
@@ -165,6 +212,7 @@ def build_multi_window_experiment_summary(config: MultiWindowSummaryConfig) -> d
             "warnings": warnings,
         },
         "ready_windows_used": ready_windows,
+        "excluded_low_sample_windows": excluded_low_sample_windows,
         "excluded_or_missing_windows": missing_windows,
         "strategy_family_stability": strategy_summary,
         "aggressive_filter_stability": aggressive_summary,
@@ -222,15 +270,35 @@ def render_multi_window_experiment_summary_markdown(summary: dict[str, Any]) -> 
     ]
     ready_windows = summary.get("ready_windows_used", [])
     if ready_windows:
-        lines.append("| As-of date | Horizon | Plan status |")
-        lines.append("|---|---:|---|")
+        lines.append("| As-of date | Horizon | Plan status | Quality status | Valid predictions | Valid ratio | High-quality ready |")
+        lines.append("|---|---:|---|---|---:|---:|---|")
         for row in ready_windows:
             lines.append(
                 f"| {row['as_of_date']} | {row['horizon_days']}d | "
-                f"{row.get('plan_status') or 'unknown'} |"
+                f"{row.get('plan_status') or 'unknown'} | "
+                f"{row.get('quality_status') or 'unknown'} | "
+                f"{row.get('valid_prediction_count')}/{row.get('prediction_count')} | "
+                f"{_fmt(row.get('valid_coverage_ratio'))} | "
+                f"{row.get('high_quality_ready')} |"
             )
     else:
         lines.append("No ready windows were available.")
+
+    lines.extend(["", "## Excluded Low-Sample Windows", ""])
+    low_sample = summary.get("excluded_low_sample_windows", [])
+    if low_sample:
+        lines.append("| As-of date | Horizon | Quality status | Valid predictions | Valid ratio | Reason |")
+        lines.append("|---|---:|---|---:|---:|---|")
+        for row in low_sample:
+            lines.append(
+                f"| {row['as_of_date']} | {row['horizon_days']}d | "
+                f"{row.get('quality_status') or 'unknown'} | "
+                f"{row.get('valid_prediction_count')}/{row.get('prediction_count')} | "
+                f"{_fmt(row.get('valid_coverage_ratio'))} | "
+                f"{row.get('reason') or 'excluded'} |"
+            )
+    else:
+        lines.append("No comparison-ready windows were excluded for low sample size.")
 
     lines.extend(["", "## Excluded And Missing Windows", ""])
     missing = summary.get("excluded_or_missing_windows", [])
@@ -407,16 +475,72 @@ def _plan_window_status(row: dict[str, Any]) -> str:
     return str(row.get("status") or "not_ready")
 
 
+def _window_quality(
+    outputs_dir: Path,
+    as_of_date: str,
+    horizon_days: int,
+    min_valid_count: int,
+    min_coverage_rate: float,
+) -> dict[str, Any]:
+    suffix = f"{as_of_date}_{horizon_days}d"
+    prediction_path = outputs_dir / "validation" / f"walk_forward_predictions_{suffix}.csv"
+    if not prediction_path.exists():
+        classified = classify_validation_quality(
+            None,
+            None,
+            min_valid_count,
+            min_coverage_rate,
+        )
+        return {
+            "prediction_count": None,
+            "valid_prediction_count": None,
+            **classified,
+            "validation_predictions_file": str(prediction_path),
+        }
+
+    frame = pd.read_csv(prediction_path, dtype={"symbol": str})
+    prediction_count = int(len(frame))
+    if "data_quality" in frame.columns:
+        valid_prediction_count = int((frame["data_quality"] == "ok").sum())
+    else:
+        valid_prediction_count = prediction_count
+    classified = classify_validation_quality(
+        prediction_count,
+        valid_prediction_count,
+        min_valid_count,
+        min_coverage_rate,
+    )
+    return {
+        "prediction_count": prediction_count,
+        "valid_prediction_count": valid_prediction_count,
+        **classified,
+        "validation_predictions_file": str(prediction_path),
+    }
+
+
+def _quality_exclusion_reason(quality: dict[str, Any]) -> str:
+    if quality.get("quality_status") == "missing_validation_outputs":
+        return "missing walk-forward prediction quality output"
+    if quality.get("quality_status") == "insufficient_valid_count":
+        return "valid_prediction_count below min_valid_count"
+    return str(quality.get("quality_status") or "not comparison eligible")
+
+
 def _with_window(
     row: dict[str, Any],
     as_of_date: str,
     horizon_days: int,
     window_id: str,
+    quality: dict[str, Any],
 ) -> dict[str, Any]:
     value = dict(row)
     value.setdefault("as_of_date", as_of_date)
     value.setdefault("horizon_days", horizon_days)
     value["window_id"] = window_id
+    value["window_quality_status"] = quality.get("quality_status")
+    value["window_valid_coverage_ratio"] = quality.get("valid_coverage_ratio")
+    value["window_comparison_eligible"] = quality.get("comparison_eligible")
+    value["window_high_quality_ready"] = quality.get("high_quality_ready")
     return value
 
 

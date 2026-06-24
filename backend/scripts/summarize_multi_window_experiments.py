@@ -27,7 +27,8 @@ def parse_args() -> argparse.Namespace:
         "--plan-file",
         default="outputs/experiments/multi_asof_validation_plan_2024.json",
     )
-    parser.add_argument("--min-valid-count", type=int, default=10)
+    parser.add_argument("--min-valid-count", type=int, default=50)
+    parser.add_argument("--min-coverage-rate", type=float, default=0.7)
     parser.add_argument(
         "--windows",
         default=None,
@@ -51,6 +52,7 @@ def main() -> int:
         plan_file=Path(args.plan_file),
         windows=_parse_windows(args.windows) if args.windows else None,
         min_valid_count=args.min_valid_count,
+        min_coverage_rate=args.min_coverage_rate,
     )
     summary = build_multi_window_experiment_summary(config)
     if args.write_output:

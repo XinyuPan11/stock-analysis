@@ -33,6 +33,41 @@ class ValidationWindowReadinessConfig:
     write_output: bool = False
 
 
+def classify_validation_quality(
+    prediction_count: int | None,
+    valid_prediction_count: int | None,
+    min_valid_count: int,
+    min_coverage_rate: float,
+) -> dict[str, Any]:
+    if prediction_count is None or valid_prediction_count is None:
+        return {
+            "quality_status": "missing_validation_outputs",
+            "comparison_eligible": False,
+            "high_quality_ready": False,
+            "valid_coverage_ratio": None,
+        }
+
+    prediction_count = int(prediction_count)
+    valid_prediction_count = int(valid_prediction_count)
+    valid_ratio = valid_prediction_count / prediction_count if prediction_count else 0.0
+    comparison_eligible = valid_prediction_count >= min_valid_count
+    high_quality_ready = comparison_eligible and valid_ratio >= min_coverage_rate
+
+    if not comparison_eligible:
+        quality_status = "insufficient_valid_count"
+    elif valid_ratio < min_coverage_rate:
+        quality_status = "low_coverage"
+    else:
+        quality_status = "high_quality"
+
+    return {
+        "quality_status": quality_status,
+        "comparison_eligible": comparison_eligible,
+        "high_quality_ready": high_quality_ready,
+        "valid_coverage_ratio": valid_ratio,
+    }
+
+
 def check_validation_window_readiness(
     config: ValidationWindowReadinessConfig,
 ) -> dict[str, Any]:
@@ -60,6 +95,10 @@ def check_validation_window_readiness(
         "prediction_count": None,
         "valid_prediction_count": None,
         "valid_coverage_ratio": None,
+        "execution_status": "unknown",
+        "quality_status": "unknown",
+        "comparison_eligible": False,
+        "high_quality_ready": False,
         "missing_outputs": {},
         "missing_as_of_outputs": {},
         "notes": [],
@@ -68,18 +107,24 @@ def check_validation_window_readiness(
     if not horizon:
         return _finish(
             base,
-            "blocked_missing_as_of_outputs",
-            _plan_command(config),
-            ["window_not_found_in_plan"],
-            config,
+            execution_status="blocked_missing_as_of_outputs",
+            quality_status="unknown",
+            comparison_eligible=False,
+            high_quality_ready=False,
+            next_command=_plan_command(config),
+            notes=["window_not_found_in_plan"],
+            config=config,
         )
     if horizon.get("crosses_2025_boundary"):
         return _finish(
             {**base, "future_window": future_window},
-            "deferred",
-            "No command: deferred because the future window crosses 2025.",
-            ["deferred_crosses_2025"],
-            config,
+            execution_status="deferred",
+            quality_status="unknown",
+            comparison_eligible=False,
+            high_quality_ready=False,
+            next_command="No command: deferred because the future window crosses 2025.",
+            notes=["deferred_crosses_2025"],
+            config=config,
         )
 
     missing_as_of = horizon.get("missing_as_of_outputs") or {}
@@ -90,19 +135,25 @@ def check_validation_window_readiness(
                 "future_window": future_window,
                 "missing_as_of_outputs": missing_as_of,
             },
-            "blocked_missing_as_of_outputs",
-            _research_views_command(config),
-            ["generate_as_of_outputs_first"],
-            config,
+            execution_status="blocked_missing_as_of_outputs",
+            quality_status="unknown",
+            comparison_eligible=False,
+            high_quality_ready=False,
+            next_command=_research_views_command(config),
+            notes=["generate_as_of_outputs_first"],
+            config=config,
         )
 
     if not symbols_file.exists():
         return _finish(
             {**base, "future_window": future_window},
-            "missing_cache",
-            _plan_command(config),
-            ["symbols_file_missing"],
-            config,
+            execution_status="missing_symbols_file",
+            quality_status="unknown",
+            comparison_eligible=False,
+            high_quality_ready=False,
+            next_command=_plan_command(config),
+            notes=["symbols_file_missing"],
+            config=config,
         )
 
     coverage = _coverage_report(config, symbols_file, future_window)
@@ -116,17 +167,28 @@ def check_validation_window_readiness(
     if float(coverage.get("coverage_rate") or 0.0) < config.min_coverage_rate:
         return _finish(
             {**base, **coverage_fields, "future_window": future_window},
-            "missing_cache",
-            requirement.get("manual_prewarm_command") or _prewarm_command(config, future_window),
-            ["cache_coverage_below_threshold"],
-            config,
+            execution_status="missing_cache",
+            quality_status="unknown",
+            comparison_eligible=False,
+            high_quality_ready=False,
+            next_command=requirement.get("manual_prewarm_command")
+            or _prewarm_command(config, future_window),
+            notes=["cache_coverage_below_threshold"],
+            config=config,
         )
 
     output_status = _output_status(outputs_dir, suffix)
     prediction = _prediction_quality(outputs_dir, suffix)
+    classified_quality = classify_validation_quality(
+        prediction.get("prediction_count"),
+        prediction.get("valid_prediction_count"),
+        config.min_valid_count,
+        config.min_coverage_rate,
+    )
     quality_fields = {
         **coverage_fields,
         **prediction,
+        **classified_quality,
         "future_window": future_window,
         "missing_outputs": output_status["missing_outputs"],
         "existing_outputs": output_status["existing_outputs"],
@@ -135,42 +197,34 @@ def check_validation_window_readiness(
     if output_status["missing_outputs"]:
         return _finish(
             {**base, **quality_fields},
-            "missing_experiment_outputs",
-            _validation_command(config),
-            ["generate_validation_and_experiment_outputs"],
-            config,
+            execution_status="missing_experiment_outputs",
+            quality_status="missing_validation_outputs",
+            comparison_eligible=False,
+            high_quality_ready=False,
+            next_command=_validation_command(config),
+            notes=["generate_validation_and_experiment_outputs"],
+            config=config,
         )
 
-    valid_count = prediction.get("valid_prediction_count")
-    prediction_count = prediction.get("prediction_count")
-    valid_ratio = prediction.get("valid_coverage_ratio")
-    if valid_count is not None and int(valid_count) < config.min_valid_count:
-        return _finish(
-            {**base, **quality_fields},
-            "low_quality",
-            _validation_command(config),
-            ["valid_prediction_count_below_threshold"],
-            config,
-        )
-    if (
-        valid_ratio is not None
-        and float(valid_ratio) < config.min_coverage_rate
-        and prediction_count
-    ):
-        return _finish(
-            {**base, **quality_fields},
-            "low_quality",
-            _validation_command(config),
-            ["valid_prediction_ratio_below_threshold"],
-            config,
-        )
+    notes = ["ready_for_manual_review"]
+    if classified_quality["quality_status"] == "insufficient_valid_count":
+        notes = ["valid_prediction_count_below_threshold"]
+    elif classified_quality["quality_status"] == "low_coverage":
+        notes = ["valid_prediction_ratio_below_threshold"]
 
     return _finish(
         {**base, **quality_fields},
-        "ready",
-        _summary_command(config),
-        ["ready_for_manual_review"],
-        config,
+        execution_status="executable_ready",
+        quality_status=str(classified_quality["quality_status"]),
+        comparison_eligible=bool(classified_quality["comparison_eligible"]),
+        high_quality_ready=bool(classified_quality["high_quality_ready"]),
+        next_command=(
+            _summary_command(config)
+            if classified_quality["comparison_eligible"]
+            else _validation_command(config)
+        ),
+        notes=notes,
+        config=config,
     )
 
 
@@ -193,20 +247,52 @@ def write_validation_window_readiness(
 
 def _finish(
     result: dict[str, Any],
-    status: str,
+    *,
+    execution_status: str,
+    quality_status: str,
+    comparison_eligible: bool,
+    high_quality_ready: bool,
     next_command: str,
     notes: list[str],
     config: ValidationWindowReadinessConfig,
 ) -> dict[str, Any]:
     payload = {
         **result,
-        "status": status,
+        "status": _legacy_status(
+            execution_status,
+            quality_status,
+            comparison_eligible,
+            high_quality_ready,
+        ),
+        "execution_status": execution_status,
+        "quality_status": quality_status,
+        "comparison_eligible": comparison_eligible,
+        "high_quality_ready": high_quality_ready,
         "next_manual_command": next_command,
         "notes": [*result.get("notes", []), *notes],
     }
     if config.write_output:
         payload["output_file"] = write_validation_window_readiness(payload, config.outputs_dir)
     return sanitize_for_json(payload)
+
+
+def _legacy_status(
+    execution_status: str,
+    quality_status: str,
+    comparison_eligible: bool,
+    high_quality_ready: bool,
+) -> str:
+    if execution_status != "executable_ready":
+        return execution_status
+    if high_quality_ready:
+        return "ready"
+    if comparison_eligible or quality_status in {
+        "low_coverage",
+        "insufficient_valid_count",
+        "missing_validation_outputs",
+    }:
+        return "low_quality"
+    return "executable_ready"
 
 
 def _load_or_build_plan(config: ValidationWindowReadinessConfig) -> dict[str, Any]:
@@ -403,5 +489,6 @@ def _summary_command(config: ValidationWindowReadinessConfig) -> str:
         "python backend\\scripts\\summarize_multi_window_experiments.py "
         f"--outputs-dir {config.outputs_dir} --plan-file "
         f"{Path(config.outputs_dir) / 'experiments' / 'multi_asof_validation_plan_2024.json'} "
-        f"--min-valid-count {config.min_valid_count} --write-output"
+        f"--min-valid-count {config.min_valid_count} "
+        f"--min-coverage-rate {config.min_coverage_rate} --write-output"
     )

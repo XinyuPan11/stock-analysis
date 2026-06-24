@@ -12,12 +12,16 @@ does not run a full workflow.
 
 - outputs/experiments/strategy_family_experiments_<as_of_date>_<horizon>d.json
 - outputs/experiments/aggressive_filter_experiments_<as_of_date>_<horizon>d.json
+- outputs/validation/walk_forward_predictions_<as_of_date>_<horizon>d.csv
 - outputs/experiments/multi_asof_validation_plan_2024.json
 
 Default behavior:
 
 - Read outputs/experiments/multi_asof_validation_plan_2024.json.
-- Include every plan window where ready_for_comparison is true.
+- Include every plan window where ready_for_comparison is true and comparison_eligible is true.
+- Label included windows with quality_status, valid prediction count, and valid coverage ratio.
+- Include low_coverage windows as exploratory comparison windows when valid count is sufficient.
+- Exclude insufficient_valid_count windows from aggregate metrics and list them separately.
 - Exclude and explain windows that are missing experiment outputs, blocked by missing as-of outputs, or deferred.
 - Optional --windows can still be used to inspect an explicit subset.
 
@@ -30,11 +34,18 @@ Default behavior:
 
 Dry-run summary:
 
-    python backend/scripts/summarize_multi_window_experiments.py --outputs-dir outputs --plan-file outputs/experiments/multi_asof_validation_plan_2024.json --min-valid-count 10
+    python backend/scripts/summarize_multi_window_experiments.py --outputs-dir outputs --plan-file outputs/experiments/multi_asof_validation_plan_2024.json --min-valid-count 50 --min-coverage-rate 0.7
 
 Write JSON and markdown outputs:
 
-    python backend/scripts/summarize_multi_window_experiments.py --outputs-dir outputs --plan-file outputs/experiments/multi_asof_validation_plan_2024.json --min-valid-count 10 --write-output
+    python backend/scripts/summarize_multi_window_experiments.py --outputs-dir outputs --plan-file outputs/experiments/multi_asof_validation_plan_2024.json --min-valid-count 50 --min-coverage-rate 0.7 --write-output
+
+## Quality Gates
+
+- `comparison_eligible` is true only when valid_prediction_count >= min_valid_count.
+- `high_quality_ready` is true only when comparison_eligible is true and valid coverage ratio >= min_coverage_rate.
+- Low-coverage but comparison-eligible windows remain exploratory and are labeled clearly.
+- Low-valid-count windows are not silently aggregated as normal evidence.
 
 ## Interpretation Rules
 
@@ -48,10 +59,10 @@ Write JSON and markdown outputs:
 ## Recommended Use
 
 Use this report to reduce manual copy and paste while reviewing whether strategy
-families and aggressive filters remain stable across all ready controlled windows
-listed in the multi-as-of plan.
-Long-term stable and conservative quality profiles may become stable baseline
-candidates only when supported across windows. Momentum breakout remains an
-aggressive candidate only when multi-window evidence supports it. Right-tail
-hunter requires filters before candidate use. Volatility expansion remains
-observation-only unless filtered results are stable with sufficient sample size.
+families and aggressive filters remain stable across comparison-eligible
+controlled windows listed in the multi-as-of plan. Long-term stable and
+conservative quality profiles may become stable baseline candidates only when
+supported across windows. Momentum breakout remains an aggressive candidate only
+when multi-window evidence supports it. Right-tail hunter requires filters
+before candidate use. Volatility expansion remains observation-only unless
+filtered results are stable with sufficient sample size.
