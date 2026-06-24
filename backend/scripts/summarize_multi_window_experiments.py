@@ -29,6 +29,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--min-valid-count", type=int, default=50)
     parser.add_argument("--min-coverage-rate", type=float, default=0.7)
+    parser.add_argument("--min-filter-sample-count", type=int, default=10)
     parser.add_argument(
         "--windows",
         default=None,
@@ -53,6 +54,7 @@ def main() -> int:
         windows=_parse_windows(args.windows) if args.windows else None,
         min_valid_count=args.min_valid_count,
         min_coverage_rate=args.min_coverage_rate,
+        min_filter_sample_count=args.min_filter_sample_count,
     )
     summary = build_multi_window_experiment_summary(config)
     if args.write_output:
