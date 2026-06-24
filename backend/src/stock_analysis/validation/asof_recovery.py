@@ -20,6 +20,8 @@ TARGET_AS_OF_DATE = "2024-10-31"
 TARGET_HORIZON_DAYS = 20
 TARGET_YEAR_END = "2024-12-31"
 OUTPUT_NAME = "asof_recovery_2024-10-31_20d.json"
+CORE_OUTPUT_KEYS = ("walk_forward_predictions", "list_performance", "factor_effectiveness")
+EXPERIMENT_OUTPUT_KEYS = ("strategy_family_experiments", "aggressive_filter_experiments")
 
 
 @dataclass(frozen=True)
@@ -46,17 +48,14 @@ def diagnose_controlled_2024_10_31_20d_recovery(
         TARGET_HORIZON_DAYS,
     )
     missing_as_of_outputs = horizon.get("missing_as_of_outputs") or {}
-    required_outputs = horizon.get("required_outputs") or _required_validation_outputs(outputs_dir)
-    existing_outputs = horizon.get("existing_outputs") or {
-        key: str(Path(path))
-        for key, path in required_outputs.items()
-        if Path(path).exists()
-    }
-    missing_outputs = horizon.get("missing_outputs") or {
-        key: str(Path(path))
-        for key, path in required_outputs.items()
-        if not Path(path).exists()
-    }
+    required_outputs = _required_validation_outputs(outputs_dir)
+    output_status = _output_status(required_outputs)
+    existing_outputs = output_status["existing_outputs"]
+    missing_outputs = output_status["missing_outputs"]
+    core_existing_outputs = output_status["core_existing_outputs"]
+    core_missing_outputs = output_status["core_missing_outputs"]
+    experiment_existing_outputs = output_status["experiment_existing_outputs"]
+    experiment_missing_outputs = output_status["experiment_missing_outputs"]
 
     symbol_details = _candidate_symbols(outputs_dir, limit=config.limit)
     prediction_details = _prediction_quality_details(outputs_dir, config)
@@ -76,14 +75,20 @@ def diagnose_controlled_2024_10_31_20d_recovery(
     elif cache_details.get("coverage_rate") is not None and float(cache_details.get("coverage_rate") or 0.0) < config.min_coverage_rate:
         status = "missing_cache"
         root_cause = "cache_coverage_below_threshold"
-    elif missing_outputs:
-        status = "missing_validation_outputs"
-        root_cause = "validation_outputs_missing"
+    elif core_missing_outputs:
+        status = "missing_core_validation_outputs"
+        root_cause = "core_validation_outputs_missing"
+    elif int(prediction_details.get("valid_future_count") or 0) <= 0:
+        status = "recovered_no_valid_future_labels"
+        root_cause = "no_valid_future_labels"
+    elif experiment_missing_outputs:
+        status = "recovered_core_outputs_missing_experiments"
+        root_cause = "optional_experiment_outputs_missing"
     elif prediction_details["quality_status"] == "high_quality":
         status = "recovered_valid"
         root_cause = "none"
     else:
-        status = "recovered_low_quality"
+        status = "recovered_low_coverage"
         root_cause = str(prediction_details["quality_status"])
 
     as_of_recoverable_with_cache_only = bool(
@@ -128,6 +133,14 @@ def diagnose_controlled_2024_10_31_20d_recovery(
         "required_outputs": required_outputs,
         "existing_outputs": existing_outputs,
         "missing_outputs": missing_outputs,
+        "core_outputs": {
+            "existing": core_existing_outputs,
+            "missing": core_missing_outputs,
+        },
+        "experiment_outputs": {
+            "existing": experiment_existing_outputs,
+            "missing": experiment_missing_outputs,
+        },
         "cache_coverage": cache_details,
         "next_manual_commands": _next_manual_commands(config, status, missing_as_of_outputs),
         "notes": _notes(status, future_recoverable, missing_as_of_outputs),
@@ -195,6 +208,43 @@ def _required_validation_outputs(outputs_dir: Path) -> dict[str, str]:
         "factor_effectiveness": str(outputs_dir / "validation" / f"factor_effectiveness_{suffix}.json"),
         "strategy_family_experiments": str(outputs_dir / "experiments" / f"strategy_family_experiments_{suffix}.json"),
         "aggressive_filter_experiments": str(outputs_dir / "experiments" / f"aggressive_filter_experiments_{suffix}.json"),
+    }
+
+
+def _output_status(required_outputs: dict[str, str]) -> dict[str, dict[str, str]]:
+    existing_outputs = {
+        key: path
+        for key, path in required_outputs.items()
+        if Path(path).exists()
+    }
+    missing_outputs = {
+        key: path
+        for key, path in required_outputs.items()
+        if key not in existing_outputs
+    }
+    return {
+        "existing_outputs": existing_outputs,
+        "missing_outputs": missing_outputs,
+        "core_existing_outputs": {
+            key: existing_outputs[key]
+            for key in CORE_OUTPUT_KEYS
+            if key in existing_outputs
+        },
+        "core_missing_outputs": {
+            key: missing_outputs[key]
+            for key in CORE_OUTPUT_KEYS
+            if key in missing_outputs
+        },
+        "experiment_existing_outputs": {
+            key: existing_outputs[key]
+            for key in EXPERIMENT_OUTPUT_KEYS
+            if key in existing_outputs
+        },
+        "experiment_missing_outputs": {
+            key: missing_outputs[key]
+            for key in EXPERIMENT_OUTPUT_KEYS
+            if key in missing_outputs
+        },
     }
 
 
@@ -336,34 +386,50 @@ def _next_manual_commands(
     if missing_as_of_outputs:
         commands.extend(
             [
-                "python backend\\scripts\\run_daily_research.py "
-                f"--provider {config.provider} --end-date {TARGET_AS_OF_DATE} "
-                f"--cache-dir {config.cache_dir} --output-dir {outputs_dir / 'daily'} "
-                f"--limit {config.limit or 0}",
-                "python backend\\scripts\\generate_research_views.py "
-                f"--date {TARGET_AS_OF_DATE} --outputs-dir {config.outputs_dir} "
-                f"--cache-dir {config.cache_dir}",
-                "python backend\\scripts\\generate_multi_asof_validation_plan.py "
-                f"--outputs-dir {config.outputs_dir} --cache-dir {config.cache_dir} "
-                f"--as-of-dates {TARGET_AS_OF_DATE} --horizons {TARGET_HORIZON_DAYS} "
-                f"--recommended-limit {config.limit or 0}",
+                _script_command("run_daily_research.py")
+                + f"--provider {config.provider} --end-date {TARGET_AS_OF_DATE} "
+                + f"--cache-dir {config.cache_dir} --output-dir {outputs_dir / 'daily'} "
+                + f"--limit {config.limit or 0}",
+                _script_command("generate_research_views.py")
+                + f"--date {TARGET_AS_OF_DATE} --outputs-dir {config.outputs_dir} "
+                + f"--cache-dir {config.cache_dir}",
+                _script_command("generate_multi_asof_validation_plan.py")
+                + f"--outputs-dir {config.outputs_dir} --cache-dir {config.cache_dir} "
+                + f"--as-of-dates {TARGET_AS_OF_DATE} --horizons {TARGET_HORIZON_DAYS} "
+                + f"--recommended-limit {config.limit or 0}",
             ]
         )
         return commands
     if status in {"missing_symbols_file", "missing_cache"}:
         commands.append(
-            "python backend\\scripts\\generate_multi_asof_validation_plan.py "
-            f"--outputs-dir {config.outputs_dir} --cache-dir {config.cache_dir} "
-            f"--as-of-dates {TARGET_AS_OF_DATE} --horizons {TARGET_HORIZON_DAYS} "
-            f"--recommended-limit {config.limit or 0}"
+            _script_command("generate_multi_asof_validation_plan.py")
+            + f"--outputs-dir {config.outputs_dir} --cache-dir {config.cache_dir} "
+            + f"--as-of-dates {TARGET_AS_OF_DATE} --horizons {TARGET_HORIZON_DAYS} "
+            + f"--recommended-limit {config.limit or 0}"
         )
-    commands.append(
-        "python backend\\scripts\\run_controlled_validation_batch.py "
-        f"--as-of-date {TARGET_AS_OF_DATE} --horizon-days {TARGET_HORIZON_DAYS} "
-        f"--benchmark {config.benchmark} --outputs-dir {config.outputs_dir} "
-        f"--cache-dir {config.cache_dir} --limit {config.limit or 0} --write-output"
-    )
+    if status == "missing_core_validation_outputs":
+        commands.append(
+            _script_command("run_controlled_validation_batch.py")
+            + f"--as-of-date {TARGET_AS_OF_DATE} --horizon-days {TARGET_HORIZON_DAYS} "
+            + f"--benchmark {config.benchmark} --outputs-dir {config.outputs_dir} "
+            + f"--cache-dir {config.cache_dir} --limit {config.limit or 0} --write-output"
+        )
+    if status == "recovered_core_outputs_missing_experiments":
+        commands.extend(
+            [
+                _script_command("run_strategy_family_experiments.py")
+                + f"--as-of-date {TARGET_AS_OF_DATE} --horizon-days {TARGET_HORIZON_DAYS} "
+                + f"--outputs-dir {config.outputs_dir} --write-output",
+                _script_command("run_aggressive_filter_experiments.py")
+                + f"--as-of-date {TARGET_AS_OF_DATE} --horizon-days {TARGET_HORIZON_DAYS} "
+                + f"--outputs-dir {config.outputs_dir} --write-output",
+            ]
+        )
     return commands
+
+
+def _script_command(script_name: str) -> str:
+    return "python backend\\scripts\\" + script_name + " "
 
 
 def _notes(
@@ -379,8 +445,10 @@ def _notes(
         notes.append("future_window_ends_in_2024")
     if missing_as_of_outputs:
         notes.append("generate_as_of_outputs_before_cache_or_validation_recovery")
-    if status == "missing_validation_outputs":
+    if status == "missing_core_validation_outputs":
         notes.append("run_controlled_validation_batch_after_cache_coverage_is_ready")
+    if status == "recovered_core_outputs_missing_experiments":
+        notes.append("core_validation_recovered_optional_experiments_missing")
     return notes
 
 

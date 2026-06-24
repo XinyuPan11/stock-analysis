@@ -53,7 +53,8 @@ class ControlledAsOfRecoveryTests(unittest.TestCase):
                 _config(root, min_valid_count=2)
             )
 
-            self.assertEqual(result["status"], "missing_validation_outputs")
+            self.assertEqual(result["status"], "recovered_core_outputs_missing_experiments")
+            self.assertEqual(result["root_cause"], "optional_experiment_outputs_missing")
             self.assertEqual(result["required_future_end_date"], "2024-12-10")
             self.assertTrue(result["as_of_result_recoverable_with_cache_through_late_2024_only"])
             self.assertEqual(result["candidate_count"], 4)
@@ -68,6 +69,34 @@ class ControlledAsOfRecoveryTests(unittest.TestCase):
             self.assertIn(("CCC", "missing_price"), skipped)
             self.assertIn(("DDD", "insufficient_future_window"), skipped)
             self.assertEqual(result["cache_coverage"]["covered_count"], 4)
+            self.assertEqual(result["core_outputs"]["missing"], {})
+            self.assertIn("strategy_family_experiments", result["experiment_outputs"]["missing"])
+            self.assertNotIn("walk_forward_predictions", result["missing_outputs"])
+            self.assertFalse(
+                any("run_controlled_validation_batch.py" in command for command in result["next_manual_commands"])
+            )
+            self.assertTrue(
+                any("run_strategy_family_experiments.py" in command for command in result["next_manual_commands"])
+            )
+
+    def test_missing_core_outputs_still_recommends_controlled_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            outputs = root / "outputs"
+            _write_as_of_outputs(outputs)
+            _write_symbols(outputs, ["AAA", "BBB"])
+            _write_cache_prices(root / "cache", ["AAA", "BBB"])
+
+            result = diagnose_controlled_2024_10_31_20d_recovery(
+                _config(root)
+            )
+
+            self.assertEqual(result["status"], "missing_core_validation_outputs")
+            self.assertIn("walk_forward_predictions", result["core_outputs"]["missing"])
+            self.assertTrue(
+                any("run_controlled_validation_batch.py" in command for command in result["next_manual_commands"])
+            )
+
 
 
 def _config(
@@ -101,8 +130,8 @@ def _write_as_of_outputs(outputs: Path) -> None:
 
 
 def _write_predictions(outputs: Path) -> None:
-    path = outputs / "validation" / "walk_forward_predictions_2024-10-31_20d.csv"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    validation = outputs / "validation"
+    validation.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
         [
             {"symbol": "AAA", "future_return": 0.10, "data_quality": "ok"},
@@ -110,7 +139,15 @@ def _write_predictions(outputs: Path) -> None:
             {"symbol": "CCC", "future_return": None, "data_quality": "missing_price"},
             {"symbol": "DDD", "future_return": None, "data_quality": "insufficient_future_window"},
         ]
-    ).to_csv(path, index=False)
+    ).to_csv(validation / "walk_forward_predictions_2024-10-31_20d.csv", index=False)
+    (validation / "list_performance_2024-10-31_20d.json").write_text(
+        json.dumps({"status": "ok", "lists": []}),
+        encoding="utf-8",
+    )
+    (validation / "factor_effectiveness_2024-10-31_20d.json").write_text(
+        json.dumps({"status": "ok", "factors": []}),
+        encoding="utf-8",
+    )
 
 
 def _write_symbols(outputs: Path, symbols: list[str]) -> None:

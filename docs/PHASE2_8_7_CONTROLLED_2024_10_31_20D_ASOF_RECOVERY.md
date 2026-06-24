@@ -48,7 +48,7 @@ When `--write-output` is used, the diagnostic writes:
 outputs/experiments/asof_recovery_2024-10-31_20d.json
 ```
 
-## Current Expected Root Cause
+## Initial Expected Root Cause
 
 Current local review shows:
 
@@ -64,13 +64,50 @@ This means the future window itself stays inside late 2024, but cache alone
 cannot recover the window until the 2024-10-31 as-of labels, factors, and lists
 exist.
 
+
+## Follow-up Diagnostic Status Notes
+
+After a limit 50 smoke recovery, the diagnostic may report:
+
+```text
+missing_as_of_outputs = {}
+cache_coverage.status = ok
+valid_future_count = 55
+prediction_count = 79
+insufficient_future_window_count = 0
+```
+
+That is a successful core validation recovery for the controlled 20d window.
+If the core validation outputs exist:
+
+```text
+outputs/validation/walk_forward_predictions_2024-10-31_20d.csv
+outputs/validation/list_performance_2024-10-31_20d.json
+outputs/validation/factor_effectiveness_2024-10-31_20d.json
+```
+
+they must appear only under `existing_outputs`, not under `missing_outputs`.
+Missing optional experiment outputs are tracked separately:
+
+```text
+outputs/experiments/strategy_family_experiments_2024-10-31_20d.json
+outputs/experiments/aggressive_filter_experiments_2024-10-31_20d.json
+```
+
+Missing experiment outputs should not invalidate core recovery. In that case,
+review `status = recovered_core_outputs_missing_experiments` and decide whether
+to run optional experiment generation.
+
+Limit 300 remains an optional next expansion after the limit 50 core recovery is
+reviewed. It is not required to prove that the 20d core recovery path works.
+
 ## Manual Recovery Sequence
 
 Only the user should run long/provider-backed commands. A controlled manual
 sequence is:
 
 ```powershell
-python backend\scriptsun_daily_research.py --provider baostock --end-date 2024-10-31 --cache-dir data\cache\daily-use --output-dir outputs\daily --limit 300
+python backend\scripts\run_daily_research.py --provider baostock --end-date 2024-10-31 --cache-dir data\cache\daily-use --output-dir outputs\daily --limit 300
 ```
 
 ```powershell
@@ -85,7 +122,7 @@ After as-of outputs and symbols/cache coverage are ready, run controlled
 validation only for this window:
 
 ```powershell
-python backend\scriptsun_controlled_validation_batch.py --as-of-date 2024-10-31 --horizon-days 20 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 300 --write-output
+python backend\scripts\run_controlled_validation_batch.py --as-of-date 2024-10-31 --horizon-days 20 --benchmark CSI300 --outputs-dir outputs --cache-dir data\cache\daily-use --limit 300 --write-output
 ```
 
 Then rerun the diagnostic:
@@ -108,11 +145,13 @@ candidate_count > 0
 valid_future_count >= 50, preferred
 missing_price_count is reviewed
 insufficient_future_window_count is reviewed
-status = recovered_valid or recovered_low_quality / missing_validation_outputs with explicit reason
+status = recovered_valid, recovered_low_coverage, or recovered_core_outputs_missing_experiments with explicit reason
 ```
 
-`recovered_low_quality` is not failure by itself; it means the diagnostic found
-valid output but quality gates need review.
+`recovered_low_coverage` is not failure by itself; it means the diagnostic found
+valid core output but quality gates need review. `recovered_core_outputs_missing_experiments`
+means core validation recovered, while optional strategy-family/aggressive-filter
+experiment outputs still need generation for summary comparison.
 
 ## Rollback And Safety Notes
 
@@ -121,7 +160,7 @@ valid output but quality gates need review.
 - Generated diagnostic output can be deleted safely:
 
 ```powershell
-Remove-Item outputs\experimentssof_recovery_2024-10-31_20d.json
+Remove-Item outputs\experiments\asof_recovery_2024-10-31_20d.json
 ```
 
 - Do not use this phase to tune scoring or filters.
