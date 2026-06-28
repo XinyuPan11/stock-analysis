@@ -138,6 +138,63 @@ python backend\scripts\prewarm_market_cache.py --provider baostock --start-date 
 
 If failures remain, generate or run the retry-only command for that chunk before moving to the next large chunk.
 
+
+## Coverage Metadata Consistency Repair
+
+Confirmed root cause:
+
+```text
+coverage metadata covered_end = 2026-06-24
+actual CSV latest trade_date = 2026-06-23
+prewarm --resume previously trusted metadata only and skipped the symbol
+```
+
+The consistency check now compares the daily CSV latest date with
+`.coverage.json`. If `metadata_covered_end` is later than `csv_latest_date`, the
+symbol is marked `coverage_metadata_mismatch`, `coverage_ok` is false, and the
+prewarm path clamps metadata to the CSV latest date before fetching the missing
+tail. Successful cache files already written are preserved.
+
+The coverage report now includes:
+
+```text
+symbol
+csv_latest_date
+metadata_covered_end
+coverage_metadata_mismatch
+repair_recommendation
+coverage_metadata_mismatch_count
+coverage_metadata_mismatch_symbols
+```
+
+Known state before repair:
+
+```text
+total_stock_csv_files = 5416
+complete_symbol_count = 5199
+stale_incomplete_symbol_count = 217
+missing_symbol_count = 0
+metadata/CSV mismatches ending at 2026-06-23 = 216
+other stale symbol latest date = 2026-06-09
+```
+
+Generate the full diagnostic report and a repair-only symbols CSV without
+accessing BaoStock:
+
+```powershell
+python backend\scripts\report_raw_cache_catchup.py --cache-dir data\cache\daily-use --provider baostock --target-end-date 2026-06-24 --output-file outputs\cache\raw_cache_catchup_coverage_2026-06-24.json --mismatched-symbols-output outputs\cache\raw_cache_mismatched_2026-06-24.csv
+```
+
+The command prints a `mismatch_repair_command`. The equivalent protected manual
+repair command is:
+
+```powershell
+python backend\scripts\prewarm_market_cache.py --provider baostock --start-date 2024-12-11 --end-date 2026-06-24 --cache-dir data\cache\daily-use --output-dir outputs\cache --symbols-file outputs\cache\raw_cache_mismatched_2026-06-24.csv --retry-only --batch-size 1 --sleep-seconds 2.0 --retry 2 --resume --max-errors 20 --symbol-timeout-seconds 40 --max-consecutive-symbol-timeouts 2 --failed-symbols-output outputs\cache\raw_cache_mismatched_2026-06-24_repair_failed.csv --progress-log outputs\cache\raw_cache_mismatched_2026-06-24_repair_progress.jsonl
+```
+
+The user runs this long repair manually. Codex only prepares and verifies the
+tooling.
+
 ## Interpretation
 
 This phase only improves raw local cache freshness. It does not imply model effectiveness and does not justify scoring/ranking changes.

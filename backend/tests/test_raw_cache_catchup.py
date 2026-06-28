@@ -13,6 +13,7 @@ from stock_analysis.data.raw_cache_catchup import (  # noqa: E402
     RawCacheCatchupPlanConfig,
     RawCacheCoverageConfig,
     build_raw_cache_coverage_report,
+    generate_mismatch_repair_command,
     generate_raw_cache_catchup_plan,
     stock_daily_adjusted_cache_path,
 )
@@ -50,6 +51,53 @@ class RawCacheCatchupTests(unittest.TestCase):
             self.assertTrue(by_symbol["AAA"]["reaches_target_end_date"])
             self.assertFalse(by_symbol["BBB"]["reaches_target_end_date"])
 
+
+    def test_coverage_report_flags_metadata_ahead_of_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_path = stock_daily_adjusted_cache_path(root / "cache", "baostock")
+            csv_path = cache_path / "sh.600000.csv"
+            _write_price(csv_path, "sh.600000", ["2024-12-11", "2026-06-23"])
+            csv_path.with_suffix(".coverage.json").write_text(
+                '{"covered_start": "2024-12-11", "covered_end": "2026-06-24"}',
+                encoding="utf-8",
+            )
+
+            report = build_raw_cache_coverage_report(
+                RawCacheCoverageConfig(
+                    cache_dir=root / "cache",
+                    provider="baostock",
+                    target_end_date="2026-06-24",
+                )
+            )
+
+            row = report["symbols"][0]
+            self.assertEqual(row["csv_latest_date"], "2026-06-23")
+            self.assertEqual(row["metadata_covered_end"], "2026-06-24")
+            self.assertTrue(row["coverage_metadata_mismatch"])
+            self.assertEqual(row["repair_recommendation"], "refresh_symbol_tail_and_rewrite_coverage_metadata")
+            self.assertEqual(report["coverage_metadata_mismatch_count"], 1)
+            self.assertEqual(report["coverage_metadata_mismatch_symbols"], ["sh.600000"])
+
+    def test_mismatch_repair_command_targets_exported_symbols_safely(self) -> None:
+        command = generate_mismatch_repair_command(
+            symbols_file="outputs/cache/raw_cache_mismatched_2026-06-24.csv",
+            start_date="2024-12-11",
+            end_date="2026-06-24",
+            cache_dir="data/cache/daily-use",
+            output_dir="outputs/cache",
+        )
+
+        self.assertIn("prewarm_market_cache.py", command)
+        self.assertIn(r"--symbols-file outputs\cache\raw_cache_mismatched_2026-06-24.csv", command)
+        self.assertIn("--retry-only", command)
+        self.assertIn("--resume", command)
+        self.assertIn("--symbol-timeout-seconds 40", command)
+        self.assertIn("--failed-symbols-output", command)
+        self.assertIn("--progress-log", command)
+        self.assertNotIn("run_daily_research.py", command)
+        self.assertNotIn("run_controlled_validation_batch.py", command)
+
     def test_chunk_plan_starts_after_confirmed_smoke_and_names_outputs(self) -> None:
         plan = generate_raw_cache_catchup_plan(
             RawCacheCatchupPlanConfig(
@@ -83,11 +131,13 @@ class RawCacheCatchupTests(unittest.TestCase):
     def test_report_script_summary_only_omits_symbol_rows(self) -> None:
         from backend.scripts.report_raw_cache_catchup import _summary_only
 
-        summary = _summary_only({"symbols": [{"symbol": "AAA"}], "stale_incomplete_symbols": [], "missing_symbols": [], "total_stock_csv_files": 1})
+        summary = _summary_only({"symbols": [{"symbol": "AAA"}], "stale_incomplete_symbols": [], "missing_symbols": [], "coverage_metadata_mismatches": [], "coverage_metadata_mismatch_symbols": ["AAA"], "total_stock_csv_files": 1})
 
         self.assertNotIn("symbols", summary)
         self.assertNotIn("stale_incomplete_symbols", summary)
         self.assertNotIn("missing_symbols", summary)
+        self.assertNotIn("coverage_metadata_mismatches", summary)
+        self.assertNotIn("coverage_metadata_mismatch_symbols", summary)
         self.assertTrue(summary["details_omitted_from_console"])
 
     def test_retry_command_uses_smaller_batch_and_longer_timeout(self) -> None:

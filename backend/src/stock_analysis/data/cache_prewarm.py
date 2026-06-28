@@ -84,6 +84,8 @@ def run_cache_prewarm(service: PrewarmMarketDataServiceLike, config: CachePrewar
     success_count = 0
     skipped_count = 0
     timeout_count = 0
+    coverage_metadata_mismatch_count = 0
+    coverage_metadata_repaired_count = 0
     consecutive_symbol_timeouts = 0
     stopped_early = False
     stop_reason = ""
@@ -96,7 +98,25 @@ def run_cache_prewarm(service: PrewarmMarketDataServiceLike, config: CachePrewar
             symbol = str(item["symbol"])
             start_date = _effective_start_date(config)
             symbol_index = processed_count
-            hit = _has_cache_hit(service.cache, config.provider, symbol, start_date, config.end_date, config.adjusted)
+            coverage_details = _cache_coverage_details(
+                service.cache,
+                config.provider,
+                symbol,
+                start_date,
+                config.end_date,
+                config.adjusted,
+            )
+            hit = bool(coverage_details["coverage_ok"])
+            if bool(coverage_details.get("coverage_metadata_mismatch")):
+                coverage_metadata_mismatch_count += 1
+                repaired = service.cache.repair_market_data_coverage_metadata(
+                    provider=config.provider,
+                    dataset="stock_daily",
+                    symbol=symbol,
+                    adjusted=config.adjusted,
+                )
+                if repaired:
+                    coverage_metadata_repaired_count += 1
             if hit:
                 cache_hit_count += 1
                 consecutive_symbol_timeouts = 0
@@ -171,6 +191,8 @@ def run_cache_prewarm(service: PrewarmMarketDataServiceLike, config: CachePrewar
         "error_count": int(len(error_frame)),
         "skipped_count": int(skipped_count),
         "timeout_count": int(timeout_count),
+        "coverage_metadata_mismatch_count": int(coverage_metadata_mismatch_count),
+        "coverage_metadata_repaired_count": int(coverage_metadata_repaired_count),
         "consecutive_symbol_timeouts": int(consecutive_symbol_timeouts),
         "max_consecutive_symbol_timeouts": config.max_consecutive_symbol_timeouts,
         "elapsed_seconds": round(time.monotonic() - started, 3),
@@ -393,7 +415,20 @@ def _has_cache_hit(
     end_date: str,
     adjusted: bool,
 ) -> bool:
-    return cache.has_market_data_coverage(
+    return bool(
+        _cache_coverage_details(cache, provider, symbol, start_date, end_date, adjusted)["coverage_ok"]
+    )
+
+
+def _cache_coverage_details(
+    cache: LocalCsvCache,
+    provider: str,
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    adjusted: bool,
+) -> dict[str, object]:
+    return cache.market_data_coverage_details(
         provider=provider,
         dataset="stock_daily",
         symbol=symbol,
