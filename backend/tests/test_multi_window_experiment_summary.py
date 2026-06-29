@@ -232,6 +232,8 @@ def test_multi_window_summary_labels_low_coverage_comparison_windows(tmp_path: P
     assert ready["prediction_count"] == 300
     assert summary["summary"]["low_coverage_window_count"] == 1
     markdown = render_multi_window_experiment_summary_markdown(summary)
+    assert markdown.startswith("# Controlled Multi-Window Validation Summary\n")
+    assert "Phase 2.8.5 Multi-Window Experiment Summary" not in markdown
     assert "low_coverage" in markdown
     assert "55/300" in markdown
 

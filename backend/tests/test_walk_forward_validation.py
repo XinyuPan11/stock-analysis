@@ -36,6 +36,12 @@ class WalkForwardValidationTests(unittest.TestCase):
             self.assertTrue(result["summary"]["no_future_leakage"])
             self.assertTrue(result["summary"]["leakage_guard_applied"])
             self.assertLessEqual(result["summary"]["latest_input_date"], "2024-01-31")
+            self.assertTrue(result["summary"]["price_point_in_time_guard_applied"])
+            self.assertEqual(result["summary"]["feature_input_point_in_time_status"], "guarded")
+            self.assertEqual(result["summary"]["future_label_window_status"], "explicit_future_only")
+            self.assertEqual(result["summary"]["universe_point_in_time_status"], "current_snapshot_limited")
+            self.assertEqual(result["summary"]["listing_status_point_in_time_status"], "current_snapshot_limited")
+            self.assertTrue(result["summary"]["known_bias_limitations"])
             self.assertEqual(result["summary"]["feature_window_rule"], "trade_date <= as_of_date")
             self.assertEqual(result["summary"]["symbol_count"], 2)
             self.assertEqual(result["outputs"], {})
@@ -123,7 +129,15 @@ class WalkForwardValidationTests(unittest.TestCase):
             self.assertTrue((validation_dir / "list_performance_2024-01-31_1d.json").exists())
             self.assertTrue((validation_dir / "factor_effectiveness_2024-01-31_1d.json").exists())
             self.assertTrue((validation_dir / "walk_forward_predictions_2024-01-31_1d.csv").exists())
-            self.assertTrue((validation_dir / "walk_forward_report_2024-01-31_1d.md").exists())
+            report_path = validation_dir / "walk_forward_report_2024-01-31_1d.md"
+            self.assertTrue(report_path.exists())
+            report = report_path.read_text(encoding="utf-8")
+            self.assertTrue(report.startswith("# Controlled Walk-forward Validation Report\n"))
+            self.assertNotIn("Phase 2.7.2 Walk-forward Validation Report", report)
+            self.assertIn("Point-in-time and bias limitations", report)
+            self.assertIn("current_snapshot_limited", report)
+            self.assertIn("controlled validation only", report)
+            self.assertIn("historical_universe_membership_not_versioned", report)
 
     def test_cli_dry_run_does_not_refresh_existing_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
