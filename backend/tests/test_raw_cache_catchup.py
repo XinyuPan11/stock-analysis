@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -139,6 +141,50 @@ class RawCacheCatchupTests(unittest.TestCase):
         self.assertNotIn("coverage_metadata_mismatches", summary)
         self.assertNotIn("coverage_metadata_mismatch_symbols", summary)
         self.assertTrue(summary["details_omitted_from_console"])
+
+
+    def test_report_cli_writes_coverage_and_mismatch_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache_path = stock_daily_adjusted_cache_path(root / "cache", "baostock")
+            csv_path = cache_path / "sh.600000.csv"
+            _write_price(csv_path, "sh.600000", ["2024-12-11", "2026-06-23"])
+            csv_path.with_suffix(".coverage.json").write_text(
+                '{"covered_start": "2024-12-11", "covered_end": "2026-06-24"}',
+                encoding="utf-8",
+            )
+            report_path = root / "coverage.json"
+            mismatch_path = root / "mismatched.csv"
+            script = Path(__file__).resolve().parents[1] / "scripts" / "report_raw_cache_catchup.py"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--cache-dir",
+                    str(root / "cache"),
+                    "--provider",
+                    "baostock",
+                    "--target-end-date",
+                    "2026-06-24",
+                    "--output-file",
+                    str(report_path),
+                    "--mismatched-symbols-output",
+                    str(mismatch_path),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertTrue(report_path.exists())
+            self.assertTrue(mismatch_path.exists())
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["coverage_metadata_mismatch_count"], 1)
+            self.assertIn("--symbols-file", report["mismatch_repair_command"])
+            exported = pd.read_csv(mismatch_path)
+            self.assertEqual(exported["symbol"].tolist(), ["sh.600000"])
 
     def test_retry_command_uses_smaller_batch_and_longer_timeout(self) -> None:
         plan = generate_raw_cache_catchup_plan(

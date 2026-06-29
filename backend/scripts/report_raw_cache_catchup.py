@@ -15,6 +15,7 @@ from stock_analysis.data.raw_cache_catchup import (  # noqa: E402
     DEFAULT_CACHE_DIR,
     DEFAULT_END_DATE,
     DEFAULT_PROVIDER,
+    DEFAULT_START_DATE,
     RawCacheCoverageConfig,
     build_raw_cache_coverage_report,
     generate_mismatch_repair_command,
