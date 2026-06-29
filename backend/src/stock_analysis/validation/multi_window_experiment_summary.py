@@ -266,7 +266,7 @@ def write_multi_window_experiment_summary_outputs(
 
 def render_multi_window_experiment_summary_markdown(summary: dict[str, Any]) -> str:
     lines = [
-        "# Phase 2.8.5 Multi-Window Experiment Summary",
+        "# Controlled Multi-Window Validation Summary",
         "",
         summary["summary"]["disclaimer"],
         "",

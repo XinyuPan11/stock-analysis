@@ -172,6 +172,47 @@ outputs/experiments/multi_window_experiment_summary_2024.json
 outputs/experiments/multi_window_experiment_summary_2024.md
 ```
 
+## Completed 2024 Panel Result
+
+The four controlled 20D windows completed with full valid-label coverage:
+
+| as_of_date | valid_future_count | benchmark quality | point-in-time result |
+| --- | ---: | --- | --- |
+| 2024-01-31 | 435 / 435 | ok | latest input equals as-of date |
+| 2024-04-30 | 300 / 300 | ok | latest input equals as-of date |
+| 2024-07-31 | 300 / 300 | ok | latest input equals as-of date |
+| 2024-10-31 | 300 / 300 | ok | latest input equals as-of date |
+
+Every window reported `no_future_leakage = true` and
+`leakage_guard_applied = true`.
+
+List-level interpretation:
+
+- `high_confidence_candidates` had mildly positive average excess return
+  across the panel, but was not uniformly strong.
+- `trend_leaders` also had mildly positive average excess return and remained
+  regime-dependent.
+- `long_term_stable` was slightly positive, but not strong enough to establish
+  a stable baseline.
+- `breakout_watch` and `accumulation_watch` were mixed.
+- `high_risk_active` was the clearest directional result: strongly negative
+  average excess return across the panel, supporting its use as a risk bucket.
+
+Factor-level interpretation:
+
+- `total_score` top-minus-bottom spread was positive on `2024-01-31` and
+  `2024-04-30`, then negative on `2024-07-31` and `2024-10-31`.
+- `total_score` therefore appears regime-dependent and does not support a
+  production scoring change.
+- `volatility` often had a negative top-quantile spread and may be useful as a
+  risk warning, subject to further controlled validation.
+- `liquidity_score`, `amount`, and `volume` were unstable and require
+  attribution before interpretation.
+
+This panel strengthens the evidence that risk separation is useful, while the
+positive-list and factor-ranking results remain conditional. It is controlled,
+research-only evidence and does not establish final model effectiveness.
+
 ## Success Criteria
 
 For every included window:
