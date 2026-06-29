@@ -82,16 +82,84 @@ class LocalCsvCache:
         end_date: str,
         adjusted: bool,
     ) -> bool:
-        """Return True when cache coverage fully contains the requested date range."""
+        """Return True when metadata and the actual CSV cover the requested range."""
+
+        details = self.market_data_coverage_details(
+            provider=provider,
+            dataset=dataset,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            adjusted=adjusted,
+        )
+        return bool(details["coverage_ok"])
+
+    def market_data_coverage_details(
+        self,
+        *,
+        provider: str,
+        dataset: str,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        adjusted: bool,
+    ) -> dict[str, object]:
+        """Inspect metadata/CSV coverage consistency without provider access."""
 
         path = self._market_path(provider=provider, dataset=dataset, symbol=symbol, adjusted=adjusted)
-        if not path.exists():
-            return False
         coverage = self._read_coverage(path.with_suffix(".coverage.json"))
-        if coverage is None:
-            cached = self._read_market(path)
-            return self._missing_ranges(cached, start_date=start_date, end_date=end_date).is_empty
-        return self._missing_ranges(pd.DataFrame(), start_date=start_date, end_date=end_date, coverage=coverage).is_empty
+        if not path.exists():
+            return {
+                "coverage_ok": False,
+                "csv_earliest_date": None,
+                "csv_latest_date": None,
+                "metadata_covered_start": coverage[0] if coverage else None,
+                "metadata_covered_end": coverage[1] if coverage else None,
+                "coverage_metadata_mismatch": False,
+            }
+        cached = self._read_market(path)
+        csv_earliest = str(cached["trade_date"].min()) if not cached.empty else None
+        csv_latest = str(cached["trade_date"].max()) if not cached.empty else None
+        mismatch = bool(coverage and csv_latest and coverage[1] > csv_latest)
+        effective_coverage = None if mismatch else coverage
+        missing = self._missing_ranges(
+            cached,
+            start_date=start_date,
+            end_date=end_date,
+            coverage=effective_coverage,
+        )
+        return {
+            "coverage_ok": missing.is_empty and not mismatch,
+            "csv_earliest_date": csv_earliest,
+            "csv_latest_date": csv_latest,
+            "metadata_covered_start": coverage[0] if coverage else None,
+            "metadata_covered_end": coverage[1] if coverage else None,
+            "coverage_metadata_mismatch": mismatch,
+        }
+
+    def repair_market_data_coverage_metadata(
+        self,
+        *,
+        provider: str,
+        dataset: str,
+        symbol: str,
+        adjusted: bool,
+    ) -> bool:
+        """Clamp covered_end to the actual CSV latest date when metadata is ahead."""
+
+        path = self._market_path(provider=provider, dataset=dataset, symbol=symbol, adjusted=adjusted)
+        coverage_path = path.with_suffix(".coverage.json")
+        coverage = self._read_coverage(coverage_path)
+        if coverage is None or not path.exists():
+            return False
+        cached = self._read_market(path)
+        if cached.empty:
+            return False
+        csv_latest = str(cached["trade_date"].max())
+        if coverage[1] <= csv_latest:
+            return False
+        self._write_coverage_exact(coverage_path, covered_start=coverage[0], covered_end=csv_latest)
+        return True
 
     def _market_path(self, *, provider: str, dataset: str, symbol: str, adjusted: bool) -> Path:
         safe_symbol = str(symbol).replace("/", "_").replace("\\", "_").replace(":", "_")
@@ -163,6 +231,17 @@ class LocalCsvCache:
         if not start or not end:
             return None
         return str(start), str(end)
+
+    def _write_coverage_exact(self, path: Path, *, covered_start: str, covered_end: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            json.dump(
+                {"covered_start": covered_start, "covered_end": covered_end},
+                handle,
+                ensure_ascii=False,
+                indent=2,
+            )
+
 
     def _write_coverage(
         self,

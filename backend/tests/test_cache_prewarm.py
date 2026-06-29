@@ -103,6 +103,37 @@ class CachePrewarmTests(unittest.TestCase):
             self.assertEqual(result.summary["skipped_count"], 1)
             self.assertEqual(service.service_calls.count("AAA"), 1)
 
+
+    def test_resume_repairs_metadata_ahead_of_csv_and_fetches_tail(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache = LocalCsvCache(temp_dir)
+            service = FakePrewarmService(cache)
+            csv_path = cache.market_data_path(
+                provider="unit",
+                dataset="stock_daily",
+                symbol="AAA",
+                adjusted=True,
+            )
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            _prices("AAA", "2024-01-01", "2024-01-04").to_csv(csv_path, index=False)
+            csv_path.with_suffix(".coverage.json").write_text(
+                '{"covered_start": "2024-01-01", "covered_end": "2024-01-05"}',
+                encoding="utf-8",
+            )
+
+            result = run_cache_prewarm(
+                service,
+                _config(cache_dir=temp_dir, output_dir=temp_dir, limit=1, resume=True),
+            )
+
+            self.assertEqual(result.summary["cache_hit_count"], 0)
+            self.assertEqual(result.summary["coverage_metadata_mismatch_count"], 1)
+            self.assertEqual(result.summary["coverage_metadata_repaired_count"], 1)
+            self.assertEqual(result.summary["success_count"], 1)
+            self.assertEqual(service.provider_fetch_calls, ["AAA"])
+            repaired = pd.read_csv(csv_path)
+            self.assertEqual(repaired["trade_date"].max(), "2024-01-05")
+
     def test_failed_symbols_file_can_be_used_for_rerun(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = FakePrewarmService(LocalCsvCache(temp_dir), failing_symbols={"BBB"})
