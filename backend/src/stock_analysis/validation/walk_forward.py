@@ -105,9 +105,18 @@ def _summary_payload(
 ) -> dict[str, object]:
     quality_counts = future_frame["data_quality"].value_counts().to_dict() if "data_quality" in future_frame.columns else {}
     valid = future_frame[future_frame.get("data_quality", "") == "ok"] if not future_frame.empty else pd.DataFrame()
+    latest_input_date = _latest_date_from_column(future_frame, "latest_input_date")
+    max_raw_cache_date = _latest_date_from_column(future_frame, "max_raw_cache_date")
+    excluded_count = int(pd.to_numeric(future_frame.get("future_rows_excluded_count", pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
     return {
         "status": "dry_run" if config.dry_run else "ok",
         "as_of_date": config.as_of_date,
+        "latest_input_date": latest_input_date,
+        "max_raw_cache_date": max_raw_cache_date,
+        "future_rows_excluded_count": excluded_count,
+        "leakage_guard_applied": True,
+        "feature_window_rule": "trade_date <= as_of_date",
+        "label_window_rule": "trade_date > as_of_date; first horizon_days trading rows",
         "horizon_days": config.horizon_days,
         "benchmark": config.benchmark,
         "benchmark_symbol": benchmark_symbol,
@@ -120,6 +129,13 @@ def _summary_payload(
         "list_count": len(list_performance),
         "factor_count": len(factor_effectiveness),
     }
+
+
+def _latest_date_from_column(frame: pd.DataFrame, column: str) -> str | None:
+    if frame.empty or column not in frame.columns:
+        return None
+    values = frame[column].dropna().astype(str)
+    return values.max() if not values.empty else None
 
 
 def _load_label_rows(outputs_dir: Path, as_of_date: str) -> pd.DataFrame:

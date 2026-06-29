@@ -25,6 +25,37 @@ class FutureReturnTests(unittest.TestCase):
         self.assertAlmostEqual(label["future_excess_return"], 0.09)
         self.assertTrue(label["outperformed_benchmark"])
 
+
+    def test_label_path_reports_explicit_feature_and_future_boundaries(self) -> None:
+        stock = _price_frame(
+            "AAA",
+            [
+                ("2024-01-30", 98),
+                ("2024-01-31", 100),
+                ("2024-02-01", 105),
+                ("2024-02-02", 110),
+                ("2024-02-05", 999),
+            ],
+        )
+
+        label = calculate_future_return_label("AAA", stock, as_of_date="2024-01-31", horizon_days=2)
+
+        self.assertEqual(label["data_quality"], "ok")
+        self.assertEqual(label["latest_input_date"], "2024-01-31")
+        self.assertEqual(label["max_raw_cache_date"], "2024-02-05")
+        self.assertEqual(label["future_rows_excluded_count"], 3)
+        self.assertEqual(label["label_future_rows_used_count"], 2)
+        self.assertEqual(label["label_window_start_date"], "2024-02-01")
+        self.assertEqual(label["label_window_end_date"], "2024-02-02")
+        self.assertTrue(label["leakage_guard_applied"])
+        self.assertAlmostEqual(label["future_return"], 0.10)
+
+    def test_malformed_label_dates_fail_clearly(self) -> None:
+        stock = _price_frame("AAA", [("2024-01-31", 100), ("bad-date", 105)])
+
+        with self.assertRaisesRegex(ValueError, "malformed trade_date"):
+            calculate_future_return_label("AAA", stock, as_of_date="2024-01-31", horizon_days=1)
+
     def test_benchmark_missing_is_explicitly_marked(self) -> None:
         stock = _price_frame("AAA", [("2024-01-31", 100), ("2024-02-01", 105)])
 

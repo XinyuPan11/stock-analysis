@@ -10,6 +10,7 @@ import pandas as pd
 
 from stock_analysis.backtesting.backtest_report import generate_backtest_report
 from stock_analysis.backtesting.metrics import calculate_backtest_metrics
+from stock_analysis.data.point_in_time import slice_daily_as_of
 from stock_analysis.data.schemas import MARKET_DATA_COLUMNS
 from stock_analysis.research.ashare_filters import FilterConfig, filter_universe
 from stock_analysis.research.factors import FACTOR_OUTPUT_COLUMNS, calculate_stock_factors
@@ -256,8 +257,8 @@ def _candidates_on_rebalance(
     config: WalkForwardConfig,
     rebalance_date: str,
 ) -> tuple[pd.DataFrame, list[dict[str, str]], list[str]]:
-    history = all_daily[all_daily["trade_date"] <= rebalance_date].copy()
-    benchmark_history = benchmark[benchmark["trade_date"] <= rebalance_date].copy()
+    history = slice_daily_as_of(all_daily, rebalance_date).frame
+    benchmark_history = slice_daily_as_of(benchmark, rebalance_date).frame
     filter_config = config.filter_config or FilterConfig(as_of_date=rebalance_date)
     filter_result = filter_universe(
         universe,

@@ -5,6 +5,7 @@ from typing import Iterable
 
 import pandas as pd
 
+from stock_analysis.data.point_in_time import slice_daily_as_of
 from stock_analysis.data.schemas import MARKET_DATA_COLUMNS, NUMERIC_MARKET_COLUMNS, validate_stock_universe_frame
 
 
@@ -53,6 +54,7 @@ def filter_universe(
     stocks = validate_stock_universe_frame(universe)
     bars = _safe_market_data(daily_bars)
     as_of_date = _resolve_as_of_date(resolved_config.as_of_date, bars)
+    bars = slice_daily_as_of(bars, as_of_date).frame
     benchmark = _normalize_benchmark_dates(benchmark_dates)
     grouped = {symbol: history.copy() for symbol, history in bars.groupby("symbol")} if not bars.empty else {}
 
