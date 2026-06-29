@@ -132,6 +132,8 @@ class WalkForwardValidationTests(unittest.TestCase):
             report_path = validation_dir / "walk_forward_report_2024-01-31_1d.md"
             self.assertTrue(report_path.exists())
             report = report_path.read_text(encoding="utf-8")
+            self.assertTrue(report.startswith("# Controlled Walk-forward Validation Report\n"))
+            self.assertNotIn("Phase 2.7.2 Walk-forward Validation Report", report)
             self.assertIn("Point-in-time and bias limitations", report)
             self.assertIn("current_snapshot_limited", report)
             self.assertIn("controlled validation only", report)

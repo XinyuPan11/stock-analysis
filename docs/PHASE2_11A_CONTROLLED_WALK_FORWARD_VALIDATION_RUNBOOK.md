@@ -21,21 +21,70 @@ The 2024-10-31 20D future window ends on 2024-12-10 and is already covered by th
 
 A 60D window from 2024-10-31 requires data in 2025 under the existing buffered validation-window planning rule. It is outside this first panel and must not be silently combined with the 20D run.
 
-## Current Local Baseline
+## First Completed Panel Result
 
-Existing ignored outputs currently report:
+The user manually completed the first controlled panel with:
 
 ```text
+as_of_date = 2024-10-31
+horizon_days = 20
+benchmark = CSI300
+limit = 300
 prediction_count = 300
 valid_future_count = 300
-valid_coverage_ratio = 1.0
-missing_price_count = 0
-insufficient_future_window_count = 0
 benchmark_data_quality = ok
-required_future_end_date = 2024-12-10
+latest_input_date = 2024-10-31
+max_raw_cache_date = 2026-06-24
+future_rows_excluded_count = 119399
+leakage_guard_applied = true
+no_future_leakage = true
 ```
 
-Those files were generated before the Phase 2.10 and Phase 2.10.1 report fields were added. Run the commands below to refresh the outputs with point-in-time diagnostics and bias limitation flags.
+The Phase 2.10 guard excluded raw-cache rows after the as-of date from feature, factor, scoring, filtering, and ranking inputs. Future rows were available only to explicit validation labels. Phase 2.10.1 bias flags were also present, including the `current_snapshot_limited` universe and status qualifications.
+
+### List-level Observations
+
+| List | Average future return | Average excess return | Outperform rate |
+| --- | ---: | ---: | ---: |
+| `trend_leaders` | approximately 2.57% | approximately 3.04% | approximately 66.7% |
+| `high_confidence_candidates` | approximately 2.15% | approximately 2.62% | approximately 61.9% |
+| `breakout_watch` | approximately 2.32% | approximately 2.79% | approximately 61.5% |
+| `high_risk_active` | approximately -3.64% | approximately -3.17% | not highlighted |
+
+These are controlled single-panel observations. They may justify continued validation of list construction, but they do not establish stable performance across dates or horizons.
+
+### Factor And Ranking Caution
+
+The `total_score` result was:
+
+```text
+correlation_with_future_return = approximately -0.060
+top_quantile_average_return = approximately 0.87%
+bottom_quantile_average_return = approximately 1.61%
+spread = approximately -0.74%
+```
+
+The negative spread means this panel does not establish that the current total-score ordering ranked stronger future outcomes above weaker ones. The list-level observations and the factor-ranking result should therefore be kept separate:
+
+- some lists showed positive average excess return and outperform rates;
+- the aggregate total-score ranking was not validated by this panel;
+- no scoring, ranking, or factor formula should be changed from one as-of date;
+- later panels must test whether either pattern persists across dates and horizons.
+
+### Interpretation Boundary
+
+The first panel confirms that the controlled validation chain can run with complete price-label coverage and the Phase 2.10 leakage guard. It does not remove the Phase 2.10.1 limitations:
+
+```text
+universe_point_in_time_status = current_snapshot_limited
+listing_status_point_in_time_status = current_snapshot_limited
+st_status_point_in_time_status = current_snapshot_limited
+suspension_status_point_in_time_status = current_snapshot_limited
+```
+
+The result is research-only controlled validation, not a final production-grade historical simulation or a model-effectiveness conclusion.
+
+The remaining commands in this runbook are retained as the reproducible procedure for refreshing or checking this panel.
 
 ## Step 1: Read-only Readiness Check
 

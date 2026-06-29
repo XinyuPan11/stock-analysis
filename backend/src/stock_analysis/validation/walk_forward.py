@@ -334,7 +334,7 @@ def _markdown_report(result: dict[str, object]) -> str:
     limitation_lines = [f"- `{item}`" for item in limitations] if isinstance(limitations, list) else []
     return "\n".join(
         [
-            "# Phase 2.7.2 Walk-forward Validation Report",
+            "# Controlled Walk-forward Validation Report",
             "",
             "No future leakage: future return labels are used only for after-the-fact validation.",
             "",
