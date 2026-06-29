@@ -5,6 +5,7 @@ from math import sqrt
 
 import pandas as pd
 
+from stock_analysis.data.point_in_time import slice_daily_as_of
 from stock_analysis.data.schemas import MARKET_DATA_COLUMNS, NUMERIC_MARKET_COLUMNS
 
 
@@ -131,18 +132,16 @@ def calculate_stock_factors(
 ) -> pd.DataFrame:
     """Calculate Phase 1 factor rows from normalized daily market data only."""
 
-    frame = _prepare_price_frame(stock_df)
     if as_of_date is not None:
-        parsed_as_of = pd.to_datetime(as_of_date, errors="coerce")
-        if pd.isna(parsed_as_of):
-            raise ValueError(f"Invalid as_of_date: {as_of_date}")
-        normalized_as_of = parsed_as_of.strftime("%Y-%m-%d")
-        frame = frame[frame["trade_date"] <= normalized_as_of].copy()
+        stock_guard = slice_daily_as_of(stock_df, as_of_date)
+        frame = _prepare_price_frame(stock_guard.frame)
         if frame.empty:
             raise ValueError(f"No stock price data on or before as_of_date: {as_of_date}")
-        as_of_date = normalized_as_of
+        as_of_date = stock_guard.as_of_date
+    else:
+        frame = _prepare_price_frame(stock_df)
 
-    benchmark_prepared = _prepare_optional_benchmark(benchmark_df)
+    benchmark_prepared = _prepare_optional_benchmark(benchmark_df, as_of_date=as_of_date)
     rows = [
         _calculate_one_stock_factors(group, benchmark_prepared, as_of_date=as_of_date)
         for _, group in frame.groupby("symbol", sort=True)
@@ -187,10 +186,15 @@ def _calculate_one_stock_factors(
     return {column: row.get(column) for column in FACTOR_OUTPUT_COLUMNS}
 
 
-def _prepare_optional_benchmark(benchmark_df: pd.DataFrame | None) -> pd.DataFrame | None:
+def _prepare_optional_benchmark(
+    benchmark_df: pd.DataFrame | None,
+    *,
+    as_of_date: str | None = None,
+) -> pd.DataFrame | None:
     if benchmark_df is None or benchmark_df.empty:
         return None
-    return _prepare_price_frame(benchmark_df)
+    guarded = slice_daily_as_of(benchmark_df, as_of_date).frame if as_of_date is not None else benchmark_df
+    return _prepare_price_frame(guarded)
 
 
 def _prepare_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:

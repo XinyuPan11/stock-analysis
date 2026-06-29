@@ -5,6 +5,8 @@ from typing import Iterable
 
 import pandas as pd
 
+from stock_analysis.data.point_in_time import split_daily_point_in_time
+
 
 PRICE_COLUMN_PREFERENCE = ["adj_close", "close"]
 
@@ -17,41 +19,60 @@ def calculate_future_return_label(
     horizon_days: int,
     benchmark_history: pd.DataFrame | None = None,
 ) -> dict[str, object]:
-    """Calculate a post-as-of future return label without using it for ranking.
-
-    No future leakage: this label is for after-the-fact validation only. It must
-    never be used to generate the as-of candidate list, factors, or scores.
-    """
-
-    base = _base_label(symbol, as_of_date, horizon_days)
-    if horizon_days <= 0:
-        return {**base, "data_quality": "invalid_horizon"}
+    """Calculate labels from an explicit post-as-of window only."""
 
     prices = _prepare_price_history(price_history)
+    split = split_daily_point_in_time(prices, as_of_date)
+    base = {
+        **_base_label(symbol, split.as_of_date, horizon_days),
+        **split.diagnostics(),
+        "feature_window_rule": "trade_date <= as_of_date",
+        "label_window_rule": "trade_date > as_of_date; first horizon_days trading rows",
+        "label_future_rows_used_count": 0,
+        "label_window_start_date": None,
+        "label_window_end_date": None,
+    }
+    if horizon_days <= 0:
+        return {**base, "data_quality": "invalid_horizon"}
     if prices.empty:
         return {**base, "data_quality": "missing_price"}
 
-    entry = prices[prices["trade_date"] == as_of_date]
+    entry = split.feature_frame[split.feature_frame["trade_date"] == split.as_of_date]
     if entry.empty:
         return {**base, "data_quality": "missing_price"}
 
-    future_window = prices[prices["trade_date"] > as_of_date].head(horizon_days)
+    future_window = split.future_frame.head(horizon_days)
+    label_diagnostics = {
+        "label_future_rows_used_count": int(len(future_window)),
+        "label_window_start_date": str(future_window.iloc[0]["trade_date"]) if not future_window.empty else None,
+        "label_window_end_date": str(future_window.iloc[-1]["trade_date"]) if not future_window.empty else None,
+    }
     if len(future_window) < horizon_days:
         entry_price = _safe_float(entry.iloc[-1]["validation_price"])
-        return {**base, "entry_price": entry_price, "data_quality": "insufficient_future_window"}
+        return {
+            **base,
+            **label_diagnostics,
+            "entry_price": entry_price,
+            "data_quality": "insufficient_future_window",
+        }
 
     entry_price = _safe_float(entry.iloc[-1]["validation_price"])
     exit_price = _safe_float(future_window.iloc[-1]["validation_price"])
     if entry_price is None or entry_price <= 0 or exit_price is None:
-        return {**base, "data_quality": "missing_price"}
+        return {**base, **label_diagnostics, "data_quality": "missing_price"}
 
     future_return = (exit_price / entry_price) - 1.0
-    benchmark_return, benchmark_quality = _benchmark_return(benchmark_history, as_of_date=as_of_date, horizon_days=horizon_days)
+    benchmark_return, benchmark_quality = _benchmark_return(
+        benchmark_history,
+        as_of_date=split.as_of_date,
+        horizon_days=horizon_days,
+    )
     future_excess_return = None if benchmark_return is None else future_return - benchmark_return
     drawdown = _max_drawdown(entry_price, future_window["validation_price"])
 
     return {
         **base,
+        **label_diagnostics,
         "entry_price": entry_price,
         "exit_price": exit_price,
         "future_return": future_return,
@@ -213,9 +234,13 @@ def _prepare_price_history(frame: pd.DataFrame | None) -> pd.DataFrame:
     if price_column is None:
         return pd.DataFrame()
     result = frame.loc[:, ["trade_date", price_column]].copy()
-    result["trade_date"] = pd.to_datetime(result["trade_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    parsed_dates = pd.to_datetime(result["trade_date"], errors="coerce")
+    if parsed_dates.isna().any():
+        invalid_count = int(parsed_dates.isna().sum())
+        raise ValueError(f"Future-return input contains {invalid_count} malformed trade_date values.")
+    result["trade_date"] = parsed_dates.dt.strftime("%Y-%m-%d")
     result["validation_price"] = pd.to_numeric(result[price_column], errors="coerce")
-    result = result.dropna(subset=["trade_date", "validation_price"])
+    result = result.dropna(subset=["validation_price"])
     result = result[result["validation_price"] > 0]
     return result.sort_values("trade_date").drop_duplicates("trade_date").reset_index(drop=True)
 

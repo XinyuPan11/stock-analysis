@@ -127,6 +127,23 @@ class FactorTests(unittest.TestCase):
         self.assertAlmostEqual(shuffled_result["momentum_60d"], sorted_result["momentum_60d"])
         self.assertEqual(shuffled_result["as_of_date"], sorted_result["as_of_date"])
 
+
+    def test_future_rows_do_not_change_as_of_factor_values(self) -> None:
+        historical = _market_frame("000001", [100 + index for index in range(130)])
+        as_of_date = str(historical["trade_date"].max())
+        future = historical.tail(1).copy()
+        future["trade_date"] = (pd.Timestamp(as_of_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        future[["open", "high", "low", "close", "adj_close"]] = 10000.0
+        with_future = pd.concat([historical, future], ignore_index=True)
+
+        expected = calculate_stock_factors(historical, as_of_date=as_of_date).iloc[0]
+        guarded = calculate_stock_factors(with_future, as_of_date=as_of_date).iloc[0]
+
+        self.assertEqual(guarded["as_of_date"], as_of_date)
+        self.assertEqual(guarded["data_points"], len(historical))
+        self.assertAlmostEqual(guarded["momentum_20d"], expected["momentum_20d"])
+        self.assertAlmostEqual(guarded["ma20"], expected["ma20"])
+
     def test_empty_input_raises_clear_error(self) -> None:
         with self.assertRaisesRegex(ValueError, "price data is empty"):
             calculate_stock_factors(pd.DataFrame())

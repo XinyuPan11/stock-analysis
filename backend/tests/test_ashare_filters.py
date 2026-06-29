@@ -73,6 +73,23 @@ class AShareFilterTests(unittest.TestCase):
         self.assertEqual(result.passed_universe["symbol"].tolist(), ["000006"])
         self.assertTrue(result.filtered_stocks.empty)
 
+
+    def test_future_rows_do_not_change_as_of_liquidity_filter(self) -> None:
+        universe = pd.DataFrame([_stock("000010")])
+        historical = _prices("000010", amount=1_000_000)
+        future = historical.tail(20).copy()
+        future["trade_date"] = pd.date_range("2024-02-01", periods=20, freq="B").strftime("%Y-%m-%d")
+        future["amount"] = 500_000_000
+
+        result = filter_universe(
+            universe,
+            pd.concat([historical, future], ignore_index=True),
+            config=self.config,
+        )
+
+        self.assertTrue(result.passed_universe.empty)
+        self.assertIn("low_20d_average_amount", result.filtered_stocks.loc[0, "reasons"])
+
     def test_multiple_filter_reasons_are_recorded(self) -> None:
         universe = pd.DataFrame([_stock("000007", name="*ST Multi")])
         history = _prices("000007", amount=1_000_000)

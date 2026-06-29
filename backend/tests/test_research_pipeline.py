@@ -122,6 +122,35 @@ class ResearchPipelineTests(unittest.TestCase):
         self.assertIn("AAA", set(result.candidates["symbol"]))
         self.assertIn("BBB", set(result.candidates["symbol"]))
 
+
+    def test_pipeline_excludes_future_rows_before_filter_factor_and_scoring(self) -> None:
+        baseline = _service()
+        baseline_result = run_research_pipeline(baseline, _config(top_n=2, limit=3))
+        service = _service()
+        future_stock = service.daily_by_symbol["AAA"].tail(1).copy()
+        future_stock["trade_date"] = "2024-02-01"
+        future_stock[["open", "high", "low", "close", "adj_close"]] = 10000.0
+        future_stock["amount"] = 900_000_000
+        service.daily_by_symbol["AAA"] = pd.concat(
+            [service.daily_by_symbol["AAA"], future_stock],
+            ignore_index=True,
+        )
+        future_benchmark = service.benchmark.tail(1).copy()
+        future_benchmark["trade_date"] = "2024-02-01"
+        future_benchmark[["open", "high", "low", "close", "adj_close"]] = 10000.0
+        service.benchmark = pd.concat([service.benchmark, future_benchmark], ignore_index=True)
+
+        result = run_research_pipeline(service, _config(top_n=2, limit=3))
+
+        expected = baseline_result.factor_frame.set_index("symbol").loc["AAA"]
+        guarded = result.factor_frame.set_index("symbol").loc["AAA"]
+        self.assertAlmostEqual(guarded["momentum_20d"], expected["momentum_20d"])
+        self.assertEqual(result.summary["as_of_date"], "2024-01-31")
+        self.assertLessEqual(result.summary["latest_input_date"], "2024-01-31")
+        self.assertEqual(result.summary["max_raw_cache_date"], "2024-02-01")
+        self.assertEqual(result.summary["future_rows_excluded_count"], 2)
+        self.assertTrue(result.summary["leakage_guard_applied"])
+
     def test_filtered_stock_does_not_enter_factor_calculation(self) -> None:
         service = _service()
 

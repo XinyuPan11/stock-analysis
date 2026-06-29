@@ -34,6 +34,9 @@ class WalkForwardValidationTests(unittest.TestCase):
 
             self.assertEqual(result["summary"]["status"], "dry_run")
             self.assertTrue(result["summary"]["no_future_leakage"])
+            self.assertTrue(result["summary"]["leakage_guard_applied"])
+            self.assertLessEqual(result["summary"]["latest_input_date"], "2024-01-31")
+            self.assertEqual(result["summary"]["feature_window_rule"], "trade_date <= as_of_date")
             self.assertEqual(result["summary"]["symbol_count"], 2)
             self.assertEqual(result["outputs"], {})
             self.assertFalse((root / "outputs" / "validation").exists())

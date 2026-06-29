@@ -11,6 +11,7 @@ from typing import Protocol
 
 import pandas as pd
 
+from stock_analysis.data.point_in_time import PointInTimeSliceResult, slice_daily_as_of
 from stock_analysis.research.ashare_filters import FilterConfig, FilterResult, filter_universe
 from stock_analysis.research.factor_explanation import FACTOR_EXPLANATION_COLUMNS, explain_factor_contributions
 from stock_analysis.research.factors import FACTOR_OUTPUT_COLUMNS, calculate_stock_factors
@@ -186,6 +187,8 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
             break
 
     all_daily = pd.concat(daily_frames, ignore_index=True) if daily_frames else pd.DataFrame()
+    stock_guard = slice_daily_as_of(all_daily, config.end_date)
+    all_daily = stock_guard.frame
     progress(
         "cache coverage / loading end",
         loaded_frames=len(daily_frames),
@@ -196,6 +199,9 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
     )
     progress("benchmark loading start", benchmark=config.benchmark)
     benchmark_frame = _fetch_benchmark(service, config, fetch_errors)
+    benchmark_guard = slice_daily_as_of(benchmark_frame, config.end_date)
+    benchmark_frame = benchmark_guard.frame
+    leakage_diagnostics = _combine_point_in_time_diagnostics(config.end_date, stock_guard, benchmark_guard)
     progress("benchmark loading end", rows=len(benchmark_frame), fetch_errors=len(fetch_errors))
     filter_config = config.filter_config or FilterConfig(as_of_date=config.end_date)
     progress("filtering start", universe_count=len(limited_universe), market_rows=len(all_daily))
@@ -245,6 +251,7 @@ def run_research_pipeline(service: MarketDataServiceLike, config: ResearchPipeli
         stopped_early=timeout_stopped_early,
         stop_reason=timeout_stop_reason,
         skipped_count=timeout_skipped_count,
+        leakage_diagnostics=leakage_diagnostics,
     )
     progress("summary building end", fetch_error_count=len(fetch_errors), scored_count=len(candidates))
     if config.error_output_dir and fetch_errors:
@@ -606,13 +613,19 @@ def _summary(
     stopped_early: bool = False,
     stop_reason: str = "",
     skipped_count: int = 0,
+    leakage_diagnostics: dict[str, object] | None = None,
 ) -> dict[str, object]:
     output_path = output_paths.get("candidates_csv") or output_paths.get("candidates_json") or ""
     timeout_count = sum(1 for error in fetch_errors if error.get("error_type") in {"symbol_timeout", "timeout"})
     partial_success = bool(stopped_early and successful_factor_count >= config.min_successful_factor_rows)
+    guard = leakage_diagnostics or _empty_point_in_time_diagnostics(config.end_date)
     return {
         "status": "partial_timeout_protected" if stopped_early else "ok",
         "as_of_date": pd.Timestamp(config.end_date).strftime("%Y-%m-%d"),
+        "latest_input_date": guard["latest_input_date"],
+        "max_raw_cache_date": guard["max_raw_cache_date"],
+        "future_rows_excluded_count": int(guard["future_rows_excluded_count"]),
+        "leakage_guard_applied": bool(guard["leakage_guard_applied"]),
         "updated_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
         "provider": config.provider,
         "benchmark": config.benchmark,
@@ -642,6 +655,31 @@ def _summary(
         "output_path": output_path,
         "output_paths": output_paths,
         "warnings": warnings,
+    }
+
+
+def _combine_point_in_time_diagnostics(
+    as_of_date: str,
+    *guards: PointInTimeSliceResult,
+) -> dict[str, object]:
+    latest_dates = [guard.latest_input_date for guard in guards if guard.latest_input_date]
+    raw_dates = [guard.max_raw_cache_date for guard in guards if guard.max_raw_cache_date]
+    return {
+        "as_of_date": pd.Timestamp(as_of_date).strftime("%Y-%m-%d"),
+        "latest_input_date": max(latest_dates) if latest_dates else None,
+        "max_raw_cache_date": max(raw_dates) if raw_dates else None,
+        "future_rows_excluded_count": sum(guard.future_rows_excluded_count for guard in guards),
+        "leakage_guard_applied": True,
+    }
+
+
+def _empty_point_in_time_diagnostics(as_of_date: str) -> dict[str, object]:
+    return {
+        "as_of_date": pd.Timestamp(as_of_date).strftime("%Y-%m-%d"),
+        "latest_input_date": None,
+        "max_raw_cache_date": None,
+        "future_rows_excluded_count": 0,
+        "leakage_guard_applied": True,
     }
 
 
