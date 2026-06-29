@@ -8,6 +8,7 @@ from typing import Iterable
 
 import pandas as pd
 
+from stock_analysis.validation.bias_metadata import validation_bias_metadata
 from stock_analysis.validation.factor_effectiveness import evaluate_factor_effectiveness
 from stock_analysis.validation.future_returns import calculate_future_return_labels, load_cached_benchmark_history, load_cached_price_history
 from stock_analysis.validation.list_performance import SUPPORTED_LIST_IDS, evaluate_lists_performance
@@ -110,6 +111,7 @@ def _summary_payload(
     excluded_count = int(pd.to_numeric(future_frame.get("future_rows_excluded_count", pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
     return {
         "status": "dry_run" if config.dry_run else "ok",
+        **validation_bias_metadata(),
         "as_of_date": config.as_of_date,
         "latest_input_date": latest_input_date,
         "max_raw_cache_date": max_raw_cache_date,
@@ -328,6 +330,8 @@ def _first_available_numeric(frame: pd.DataFrame, candidates: list[str]) -> pd.S
 
 def _markdown_report(result: dict[str, object]) -> str:
     summary = result.get("summary", {})
+    limitations = summary.get("known_bias_limitations", [])
+    limitation_lines = [f"- `{item}`" for item in limitations] if isinstance(limitations, list) else []
     return "\n".join(
         [
             "# Phase 2.7.2 Walk-forward Validation Report",
@@ -339,6 +343,23 @@ def _markdown_report(result: dict[str, object]) -> str:
             f"- Horizon days: {summary.get('horizon_days')}",
             f"- Symbols: {summary.get('symbol_count')}",
             f"- Valid future labels: {summary.get('valid_future_count')}",
+            "",
+            "## Point-in-time and bias limitations",
+            "",
+            f"- Price point-in-time guard applied: {summary.get('price_point_in_time_guard_applied')}",
+            f"- Feature input point-in-time status: {summary.get('feature_input_point_in_time_status')}",
+            f"- Future label window status: {summary.get('future_label_window_status')}",
+            f"- Universe point-in-time status: {summary.get('universe_point_in_time_status')}",
+            f"- Listing status point-in-time status: {summary.get('listing_status_point_in_time_status')}",
+            f"- ST status point-in-time status: {summary.get('st_status_point_in_time_status')}",
+            f"- Suspension status point-in-time status: {summary.get('suspension_status_point_in_time_status')}",
+            "",
+            "Price and factor inputs are guarded by Phase 2.10. Historical universe and status metadata remain limited by current or non-versioned snapshots.",
+            "",
+            "Interpretation: controlled validation only, not a final production-grade historical simulation.",
+            "",
+            "Known bias limitations:",
+            *limitation_lines,
         ]
     )
 
