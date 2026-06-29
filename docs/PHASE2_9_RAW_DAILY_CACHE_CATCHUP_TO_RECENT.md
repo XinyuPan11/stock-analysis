@@ -54,12 +54,6 @@ outputs/cache
 
 Read-only local cache coverage report:
 
-```powershell
-python backend
-eg scripts? nope
-```
-
-Use this command:
 
 ```powershell
 python backend\scripts\report_raw_cache_catchup.py --cache-dir data\cache\daily-use --provider baostock --target-end-date 2026-06-24 --output-file outputs\cache\raw_cache_catchup_coverage_2026-06-24.json
@@ -83,9 +77,11 @@ symbols[].latest_cached_date
 symbols[].reaches_target_end_date
 ```
 
-## Chunk Plan Generation
+## Chunk Plan Generation (Historical Reference)
 
-Generate the next manual chunks after the confirmed first 250 symbols:
+This section records the workflow used during catch-up. Do not run additional full-market chunks after the final Phase 2.9 result.
+
+The command used to generate manual chunks after the confirmed first 250 symbols was:
 
 ```powershell
 python backend\scripts\generate_raw_cache_catchup_plan.py --provider baostock --start-date 2024-12-11 --end-date 2026-06-24 --cache-dir data\cache\daily-use --output-dir outputs\cache --chunk-size 500 --start-offset 250 --chunk-count 1 --write-output
@@ -109,7 +105,9 @@ Each generated chunk command includes:
 --progress-log
 ```
 
-## Retry Plan
+## Retry Plan (Historical Reference)
+
+This section records targeted retry tooling used during catch-up. Do not blindly retry the final two data-quality exceptions.
 
 Generate a retry-only command from one failed-symbols CSV:
 
@@ -128,16 +126,12 @@ Retry command defaults follow the successful manual retry pattern:
 --max-consecutive-symbol-timeouts 2
 ```
 
-## Next Manual Command
+## Catch-up Stop Condition
 
-Recommended next manual chunk after confirmed first 250 symbols:
-
-```powershell
-python backend\scripts\prewarm_market_cache.py --provider baostock --start-date 2024-12-11 --end-date 2026-06-24 --cache-dir data\cache\daily-use --output-dir outputs\cache --limit 500 --offset 250 --batch-size 5 --sleep-seconds 1.0 --retry 1 --resume --max-errors 50 --symbol-timeout-seconds 20 --max-consecutive-symbol-timeouts 3 --failed-symbols-output outputs\cache\raw_catchup_2024-12-11_2026-06-24_offset250_limit500_failed.csv --progress-log outputs\cache\raw_catchup_2024-12-11_2026-06-24_offset250_limit500_progress.jsonl
-```
-
-If failures remain, generate or run the retry-only command for that chunk before moving to the next large chunk.
-
+The full-market catch-up and metadata repair are complete enough for Phase 2.9.
+Do not continue full-market prewarm or blind retries for the remaining two
+symbols. Preserve them as explicit data-quality exceptions unless later provider
+evidence shows they can be recovered safely.
 
 ## Coverage Metadata Consistency Repair
 
@@ -178,8 +172,9 @@ metadata/CSV mismatches ending at 2026-06-23 = 216
 other stale symbol latest date = 2026-06-09
 ```
 
-Generate the full diagnostic report and a repair-only symbols CSV without
-accessing BaoStock:
+The following completed diagnostic workflow is retained for audit/history. It
+reads local cache only; no further repair run is recommended after the final
+result:
 
 ```powershell
 python backend\scripts\report_raw_cache_catchup.py --cache-dir data\cache\daily-use --provider baostock --target-end-date 2026-06-24 --output-file outputs\cache\raw_cache_catchup_coverage_2026-06-24.json --mismatched-symbols-output outputs\cache\raw_cache_mismatched_2026-06-24.csv
@@ -192,9 +187,46 @@ repair command is:
 python backend\scripts\prewarm_market_cache.py --provider baostock --start-date 2024-12-11 --end-date 2026-06-24 --cache-dir data\cache\daily-use --output-dir outputs\cache --symbols-file outputs\cache\raw_cache_mismatched_2026-06-24.csv --retry-only --batch-size 1 --sleep-seconds 2.0 --retry 2 --resume --max-errors 20 --symbol-timeout-seconds 40 --max-consecutive-symbol-timeouts 2 --failed-symbols-output outputs\cache\raw_cache_mismatched_2026-06-24_repair_failed.csv --progress-log outputs\cache\raw_cache_mismatched_2026-06-24_repair_progress.jsonl
 ```
 
-The user runs this long repair manually. Codex only prepares and verifies the
-tooling.
+The user completed this repair manually. Codex prepared and verified the
+tooling without running the BaoStock job.
+
+
+## Final Manual Result
+
+Final read-only coverage report after metadata repair:
+
+```text
+total_stock_csv_files = 5416
+complete_symbol_count = 5414
+stale_incomplete_symbol_count = 2
+missing_symbol_count = 0
+coverage_metadata_mismatch_count = 0
+coverage_to_target = 5414 / 5416 = 99.96%
+```
+
+All metadata/CSV mismatch cases were repaired or eliminated. The two remaining
+stale symbols are data-quality exceptions, not a catch-up workflow failure:
+
+```text
+sh.600212 latest_cached_date = 2026-06-23, row_count = 917
+sh.688287 latest_cached_date = 2026-06-09, row_count = 908
+```
+
+`sh.688287` previously returned `empty_market_data`. Treat it as a provider or
+data-source exception unless later evidence proves otherwise. Do not continue
+blind retries for either symbol.
+
+## Phase Status And Next Step
+
+Phase 2.9 is merge-ready. Raw daily cache catch-up is effectively complete for
+the controlled target date, with 99.96% symbol coverage and zero metadata/CSV
+mismatches.
+
+The next phase should add point-in-time and no-future-leakage guards before any
+broad validation. It must verify that features, lists, filters, dynamic states,
+and cache reads use only data available on or before each as-of date; future
+returns and drawdowns remain evaluation labels only.
 
 ## Interpretation
 
-This phase only improves raw local cache freshness. It does not imply model effectiveness and does not justify scoring/ranking changes.
+Phase 2.9 improves raw local cache freshness only. The 99.96% result does not imply model effectiveness and does not justify scoring, ranking, factor, validation-math, or production recommendation changes.
