@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +40,14 @@ class CacheOnlyAsOfConfig:
     symbols_file: str | Path | None = None
     top_n: int = 20
     lookback_years: int = 1
+
+
+@dataclass(frozen=True)
+class BenchmarkCacheResolution:
+    symbol: str
+    paths: tuple[Path, ...]
+    covered_start: str
+    covered_end: str
 
 
 class CacheOnlyDataMissingError(RuntimeError):
@@ -128,8 +136,18 @@ class CacheOnlyMarketDataService:
                 f"Required benchmark cache is missing or incomplete for {index_code}.",
                 benchmark_missing=True,
             )
-        _, path = resolved
-        return _read_cache_with_future_rows(path, start_date=start_date)
+        frames = [
+            _read_cache_with_future_rows(path, start_date=start_date)
+            for path in resolved.paths
+        ]
+        combined = validate_market_data_frame(
+            pd.concat(frames, ignore_index=True)
+            .sort_values("trade_date")
+            .drop_duplicates("trade_date", keep="last")
+            .reset_index(drop=True)
+        )
+        combined["symbol"] = resolved.symbol
+        return combined
 
     def missing_stock_cache(
         self,
@@ -156,28 +174,54 @@ class CacheOnlyMarketDataService:
         benchmark: str,
         start_date: str,
         end_date: str,
-    ) -> tuple[str, Path] | None:
+    ) -> BenchmarkCacheResolution | None:
         aliases = _dedupe([benchmark, *benchmark_aliases(benchmark)])
+        candidates: list[dict[str, Any]] = []
         for alias in aliases:
             for dataset, adjusted in (("index_daily", False), ("stock_daily", True)):
-                if self.cache.has_market_data_coverage(
+                details = self.cache.market_data_coverage_details(
                     provider=self.provider_name,
                     dataset=dataset,
                     symbol=alias,
                     start_date=start_date,
                     end_date=end_date,
                     adjusted=adjusted,
-                ):
-                    return (
-                        alias,
-                        self.cache.market_data_path(
-                            provider=self.provider_name,
-                            dataset=dataset,
-                            symbol=alias,
-                            adjusted=adjusted,
-                        ),
+                )
+                interval = _effective_coverage_interval(details)
+                if interval is not None:
+                    candidates.append(
+                        {
+                            "symbol": alias,
+                            "path": self.cache.market_data_path(
+                                provider=self.provider_name,
+                                dataset=dataset,
+                                symbol=alias,
+                                adjusted=adjusted,
+                            ),
+                            "start": interval[0],
+                            "end": interval[1],
+                        }
                     )
-        return None
+        selected = _select_covering_intervals(candidates, start_date, end_date)
+        if not selected:
+            return None
+        selected_aliases = [str(item["symbol"]) for item in selected]
+        resolved_symbol = next(
+            (
+                alias
+                for alias in benchmark_aliases(benchmark)
+                if alias in selected_aliases
+            ),
+            selected_aliases[-1],
+        )
+        paths = tuple(dict.fromkeys(Path(str(item["path"])) for item in selected))
+        return BenchmarkCacheResolution(
+            symbol=resolved_symbol,
+            paths=paths,
+            covered_start=min(str(item["start"]) for item in selected),
+            covered_end=max(str(item["end"]) for item in selected),
+        )
+
 
 
 def generate_cache_only_asof_daily_outputs(
@@ -256,7 +300,7 @@ def generate_cache_only_asof_daily_outputs(
     ):
         raise RuntimeError("Point-in-time guard verification failed after cache-only generation.")
 
-    resolved_benchmark, _ = benchmark_cache
+    resolved_benchmark = benchmark_cache.symbol
     safety_metadata = {
         "provider_access": False,
         "cache_only": True,
@@ -384,6 +428,48 @@ def _read_cache_with_future_rows(path: Path, *, start_date: str) -> pd.DataFrame
         )
     )
     return frame[frame["trade_date"] >= start_date].reset_index(drop=True)
+
+
+def _effective_coverage_interval(
+    details: dict[str, object],
+) -> tuple[str, str] | None:
+    if details.get("coverage_metadata_mismatch"):
+        return None
+    metadata_start = details.get("metadata_covered_start")
+    metadata_end = details.get("metadata_covered_end")
+    csv_start = details.get("csv_earliest_date")
+    csv_end = details.get("csv_latest_date")
+    if not all((metadata_start, metadata_end, csv_start, csv_end)):
+        return None
+    effective_start = max(str(metadata_start), str(csv_start))
+    effective_end = min(str(metadata_end), str(csv_end))
+    if effective_start > effective_end:
+        return None
+    return effective_start, effective_end
+
+
+def _select_covering_intervals(
+    candidates: list[dict[str, Any]],
+    start_date: str,
+    end_date: str,
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    cursor = start_date
+    while cursor <= end_date:
+        options = [
+            item
+            for item in candidates
+            if str(item["start"]) <= cursor <= str(item["end"])
+        ]
+        if not options:
+            return []
+        best = max(options, key=lambda item: str(item["end"]))
+        selected.append(best)
+        best_end = str(best["end"])
+        if best_end >= end_date:
+            return selected
+        cursor = (date.fromisoformat(best_end) + timedelta(days=1)).isoformat()
+    return selected
 
 
 def _dedupe(values: list[str]) -> list[str]:

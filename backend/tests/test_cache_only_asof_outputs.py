@@ -65,6 +65,82 @@ def test_missing_benchmark_cache_fails_closed(tmp_path: Path) -> None:
     assert not (tmp_path / "outputs" / "daily").exists()
 
 
+def test_index_daily_csi300_cache_is_recognized(tmp_path: Path) -> None:
+    _write_complete_fixture(tmp_path, write_benchmark_cache=False)
+    dates = pd.date_range("2023-01-02", "2024-03-05", freq="B").strftime(
+        "%Y-%m-%d"
+    ).tolist()
+    _write_market_cache(
+        tmp_path / "cache",
+        dataset="index_daily",
+        adjusted=False,
+        symbol="CSI300",
+        dates=dates,
+        growth=1.0,
+    )
+
+    result = generate_cache_only_asof_daily_outputs(_config(tmp_path))
+
+    assert result["benchmark_symbol"] == "CSI300"
+    assert result["provider_access"] is False
+
+
+def test_split_benchmark_alias_cache_covers_full_feature_window(
+    tmp_path: Path,
+) -> None:
+    _write_complete_fixture(
+        tmp_path,
+        write_stock_cache=False,
+        write_benchmark_cache=False,
+    )
+    stock_dates = pd.date_range("2023-01-02", "2024-12-10", freq="B").strftime(
+        "%Y-%m-%d"
+    ).tolist()
+    early_benchmark_dates = pd.date_range(
+        "2022-09-05", "2024-10-31", freq="B"
+    ).strftime("%Y-%m-%d").tolist()
+    recent_benchmark_dates = pd.date_range(
+        "2024-02-01", "2024-12-10", freq="B"
+    ).strftime("%Y-%m-%d").tolist()
+    _write_market_cache(
+        tmp_path / "cache",
+        dataset="stock_daily",
+        adjusted=True,
+        symbol=SYMBOL,
+        dates=stock_dates,
+        growth=1.4,
+    )
+    _write_market_cache(
+        tmp_path / "cache",
+        dataset="index_daily",
+        adjusted=False,
+        symbol="CSI300",
+        dates=early_benchmark_dates,
+        growth=1.0,
+    )
+    _write_market_cache(
+        tmp_path / "cache",
+        dataset="stock_daily",
+        adjusted=True,
+        symbol="sh.000300",
+        dates=recent_benchmark_dates,
+        growth=1.0,
+    )
+    config = CacheOnlyAsOfConfig(
+        as_of_date="2024-11-29",
+        outputs_dir=tmp_path / "outputs",
+        cache_dir=tmp_path / "cache",
+        limit=1,
+        top_n=1,
+    )
+
+    result = generate_cache_only_asof_daily_outputs(config)
+
+    assert result["benchmark_symbol"] == "sh.000300"
+    assert result["latest_input_date"] == "2024-11-29"
+    assert result["provider_access"] is False
+
+
 @pytest.mark.parametrize(
     "forbidden_date",
     ["2024-01-31", "2024-04-30", "2024-07-31", "2024-10-31"],
