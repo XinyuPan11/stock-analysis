@@ -42,6 +42,8 @@ def test_asof_technical_features_exclude_future_cache_rows(
     )
 
     row = _row(result.frame, "A")
+    assert row["as_of_date"] == AS_OF_DATE
+    assert row["horizon_days"] == 20
     assert row["latest_input_date"] == AS_OF_DATE
     assert row["max_raw_cache_date"] == "2024-03-12"
     assert row["future_rows_excluded_count"] == 2

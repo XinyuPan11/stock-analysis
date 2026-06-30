@@ -586,7 +586,7 @@ def _technical_feature_row(
         return empty
     frame = sliced.frame.copy()
     if frame.empty:
-        empty.update(sliced.diagnostics())
+        empty.update(_technical_diagnostics(sliced))
         empty["_technical_missing_flags"] = ["no_rows_on_or_before_as_of"]
         return empty
     frame["trade_date"] = pd.to_datetime(
@@ -596,7 +596,7 @@ def _technical_feature_row(
     frame = frame.sort_values("trade_date")
     price_column = "adj_close" if "adj_close" in frame else "close"
     if price_column not in frame:
-        empty.update(sliced.diagnostics())
+        empty.update(_technical_diagnostics(sliced))
         empty["_technical_missing_flags"] = ["missing_price_column"]
         return empty
     price = pd.to_numeric(frame[price_column], errors="coerce").dropna()
@@ -646,8 +646,15 @@ def _technical_feature_row(
     return {
         "symbol": symbol,
         **values,
-        **sliced.diagnostics(),
+        **_technical_diagnostics(sliced),
         "_technical_missing_flags": missing,
+    }
+
+
+def _technical_diagnostics(sliced: Any) -> dict[str, Any]:
+    diagnostics = sliced.diagnostics()
+    return {
+        field: diagnostics.get(field) for field in POINT_IN_TIME_FIELDS
     }
 
 
