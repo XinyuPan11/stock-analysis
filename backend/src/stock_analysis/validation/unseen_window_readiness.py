@@ -18,12 +18,43 @@ PROPOSED_U1_WINDOWS: tuple[tuple[str, int], ...] = (
     ("2024-08-30", 20),
     ("2024-11-29", 20),
 )
+PROPOSED_U2_WINDOWS: tuple[tuple[str, int], ...] = (
+    ("2025-02-28", 20),
+    ("2025-05-30", 20),
+    ("2025-08-29", 20),
+    ("2025-11-28", 20),
+)
+CONSUMED_U1_WINDOWS: tuple[tuple[str, int], ...] = PROPOSED_U1_WINDOWS
 FORBIDDEN_ANSWER_KEY_WINDOWS: tuple[tuple[str, int], ...] = (
     ("2024-01-31", 20),
     ("2024-04-30", 20),
     ("2024-07-31", 20),
     ("2024-10-31", 20),
 )
+DEFAULT_WINDOW_SET = "u1-2024"
+WINDOW_SET_SPECS: dict[str, dict[str, Any]] = {
+    "u1-2024": {
+        "phase": "2.19",
+        "label": "U1",
+        "windows": PROPOSED_U1_WINDOWS,
+        "output_stem": "unseen_window_readiness_2024",
+        "accepted_status": "accepted_proposed_u1_candidate",
+        "accepted_reason": "phase_2_18_proposed_candidate",
+        "outside_status": "rejected_outside_frozen_u1_candidate_pool",
+        "outside_reason": "not_in_phase_2_18_proposed_u1_pool",
+    },
+    "u2-2025": {
+        "phase": "2.26",
+        "label": "U2",
+        "windows": PROPOSED_U2_WINDOWS,
+        "output_stem": "u2_window_readiness_2025",
+        "accepted_status": "accepted_preregistered_u2_candidate",
+        "accepted_reason": "phase_2_25_preregistered_u2_candidate",
+        "outside_status": "rejected_outside_frozen_u2_candidate_pool",
+        "outside_reason": "not_in_phase_2_25_preregistered_u2_pool",
+    },
+}
+WINDOW_SET_NAMES: tuple[str, ...] = tuple(WINDOW_SET_SPECS)
 DISCLAIMER = (
     "Readiness-only inspection. Proposed U1 windows have not been evaluated. "
     "No unseen outcomes or performance metrics are read or computed."
@@ -37,19 +68,32 @@ class UnseenWindowReadinessConfig:
     provider: str = "baostock"
     benchmark: str = "CSI300"
     limit: int = 300
+    window_set: str = DEFAULT_WINDOW_SET
 
 
 def check_unseen_window_readiness(
     config: UnseenWindowReadinessConfig,
 ) -> dict[str, Any]:
-    windows = [_check_window(config, as_of_date, horizon) for as_of_date, horizon in PROPOSED_U1_WINDOWS]
+    spec = _window_set_spec(config.window_set)
+    selected_windows = tuple(spec["windows"])
+    windows = [
+        _check_window(config, as_of_date, horizon)
+        for as_of_date, horizon in selected_windows
+    ]
     status_counts: dict[str, int] = {}
     for item in windows:
         status = str(item["readiness_status"])
         status_counts[status] = status_counts.get(status, 0) + 1
-    return {
-        "phase": "2.19",
+    selected_payload = [
+        {"as_of_date": as_of_date, "horizon_days": horizon}
+        for as_of_date, horizon in selected_windows
+    ]
+    report = {
+        "phase": spec["phase"],
         "status": "readiness_complete",
+        "window_set": config.window_set,
+        "window_set_label": spec["label"],
+        "output_stem": spec["output_stem"],
         "readiness_only": True,
         "provider_access": False,
         "provider_fetch_executed": False,
@@ -58,29 +102,44 @@ def check_unseen_window_readiness(
         "outcomes_inspected": False,
         "performance_metrics_computed": False,
         "production_logic_changed": False,
-        "disclaimer": DISCLAIMER,
-        "proposed_u1_windows": [
-            {"as_of_date": as_of_date, "horizon_days": horizon}
-            for as_of_date, horizon in PROPOSED_U1_WINDOWS
-        ],
+        "disclaimer": _disclaimer(config.window_set),
+        "selected_windows": selected_payload,
         "forbidden_answer_key_windows": [
             {"as_of_date": as_of_date, "horizon_days": horizon}
             for as_of_date, horizon in FORBIDDEN_ANSWER_KEY_WINDOWS
         ],
-        "forbidden_windows_excluded": True,
+        "consumed_u1_windows": [
+            {"as_of_date": as_of_date, "horizon_days": horizon}
+            for as_of_date, horizon in CONSUMED_U1_WINDOWS
+        ],
+        "forbidden_windows_excluded": not (
+            set(selected_windows) & set(FORBIDDEN_ANSWER_KEY_WINDOWS)
+        ),
+        "consumed_u1_windows_excluded": not (
+            set(selected_windows) & set(CONSUMED_U1_WINDOWS)
+        ),
         "status_counts": status_counts,
         "windows": windows,
         "guardrails": [
             "This is readiness only, not validation.",
             "The original answer-key windows remain forbidden as proof.",
+            "Consumed U1 windows are excluded from the U2 window set.",
             "Prediction rows and future-return fields are not opened.",
-            "U1 outcomes, list performance, winner/loser groups, and hypotheses are not evaluated.",
+            "Unseen outcomes, list performance, winner/loser groups, and hypotheses are not evaluated.",
             "Provider access remains false.",
         ],
     }
+    selected_key = "proposed_u1_windows" if config.window_set == "u1-2024" else "proposed_u2_windows"
+    report[selected_key] = selected_payload
+    return report
 
 
-def validate_unseen_window_candidate(as_of_date: str, horizon_days: int) -> dict[str, Any]:
+def validate_unseen_window_candidate(
+    as_of_date: str,
+    horizon_days: int,
+    window_set: str = DEFAULT_WINDOW_SET,
+) -> dict[str, Any]:
+    spec = _window_set_spec(window_set)
     key = (as_of_date, int(horizon_days))
     if key in FORBIDDEN_ANSWER_KEY_WINDOWS:
         return {
@@ -88,16 +147,22 @@ def validate_unseen_window_candidate(as_of_date: str, horizon_days: int) -> dict
             "candidate_status": "rejected_forbidden_answer_key_window",
             "reason": "permanently_forbidden_as_proof",
         }
-    if key not in PROPOSED_U1_WINDOWS:
+    if window_set == "u2-2025" and key in CONSUMED_U1_WINDOWS:
         return {
             "accepted": False,
-            "candidate_status": "rejected_outside_frozen_u1_candidate_pool",
-            "reason": "not_in_phase_2_18_proposed_u1_pool",
+            "candidate_status": "rejected_consumed_u1_window",
+            "reason": "consumed_u1_not_eligible_for_sealed_u2",
+        }
+    if key not in spec["windows"]:
+        return {
+            "accepted": False,
+            "candidate_status": spec["outside_status"],
+            "reason": spec["outside_reason"],
         }
     return {
         "accepted": True,
-        "candidate_status": "accepted_proposed_u1_candidate",
-        "reason": "phase_2_18_proposed_candidate",
+        "candidate_status": spec["accepted_status"],
+        "reason": spec["accepted_reason"],
     }
 
 
@@ -107,8 +172,9 @@ def write_unseen_window_readiness(
 ) -> dict[str, str]:
     output_dir = Path(outputs_dir) / "experiments"
     output_dir.mkdir(parents=True, exist_ok=True)
-    json_path = output_dir / "unseen_window_readiness_2024.json"
-    markdown_path = output_dir / "unseen_window_readiness_2024.md"
+    output_stem = str(report.get("output_stem") or "unseen_window_readiness_2024")
+    json_path = output_dir / f"{output_stem}.json"
+    markdown_path = output_dir / f"{output_stem}.md"
     json_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
@@ -118,13 +184,21 @@ def write_unseen_window_readiness(
 
 
 def markdown_unseen_window_readiness(report: dict[str, Any]) -> str:
+    label = str(report.get("window_set_label") or "U1")
+    is_u2 = report.get("window_set") == "u2-2025"
+    state_line = (
+        "The U2 results remain sealed and have not been evaluated."
+        if is_u2
+        else "The U1 windows are proposed and have not been evaluated."
+    )
     lines = [
-        "# Unseen Window Readiness Check",
+        f"# {label} Window Readiness Check",
         "",
         str(report.get("disclaimer", DISCLAIMER)),
         "",
-        "This is readiness only, not validation. The U1 windows are proposed and have not been evaluated.",
+        f"This is readiness only, not validation. {state_line}",
         "The four original answer-key windows remain permanently forbidden as proof.",
+        "Consumed U1 windows are excluded from sealed U2 confirmation.",
         "No unseen outcomes, list performance, winner/loser metrics, or hypothesis results were inspected.",
         "",
         "## Guardrails",
@@ -133,8 +207,9 @@ def markdown_unseen_window_readiness(report: dict[str, Any]) -> str:
         f"- Outcomes inspected: `{str(report.get('outcomes_inspected')).lower()}`",
         f"- Performance metrics computed: `{str(report.get('performance_metrics_computed')).lower()}`",
         f"- Forbidden windows excluded: `{str(report.get('forbidden_windows_excluded')).lower()}`",
+        f"- Consumed U1 windows excluded: `{str(report.get('consumed_u1_windows_excluded')).lower()}`",
         "",
-        "## Proposed U1 Readiness",
+        f"## Proposed {label} Readiness",
         "",
         "| As-of date | Horizon | Status | Future end | Symbols | As-of cache | Future cache | Benchmark | Missing as-of outputs | Existing validation outputs |",
         "|---|---:|---|---|---:|---|---|---|---|---|",
@@ -194,7 +269,7 @@ def markdown_unseen_window_readiness(report: dict[str, Any]) -> str:
         [
             "## Later Manual Commands",
             "",
-            "Run validation only after U1/U2 selection is committed. Commands in this report were not executed by the checker.",
+            f"Run validation only after the {label} selection and readiness state are committed. Commands in this report were not executed by the checker.",
             "",
         ]
     )
@@ -215,7 +290,7 @@ def markdown_unseen_window_readiness(report: dict[str, Any]) -> str:
         [
             "## Interpretation Boundary",
             "",
-            "A ready status proves only that a later controlled run is technically feasible from local inputs. It is not blind-validation evidence, does not consume or interpret unseen outcomes, and does not support production changes.",
+            "A ready status proves only that a later controlled run is technically feasible from local inputs. It is not validation evidence, does not consume or interpret unseen outcomes, and does not support production changes.",
             "",
         ]
     )
@@ -227,7 +302,9 @@ def _check_window(
     as_of_date: str,
     horizon_days: int,
 ) -> dict[str, Any]:
-    candidate = validate_unseen_window_candidate(as_of_date, horizon_days)
+    candidate = validate_unseen_window_candidate(
+        as_of_date, horizon_days, window_set=config.window_set
+    )
     outputs_dir = Path(config.outputs_dir)
     required_future_end = recommended_target_end_date(as_of_date, horizon_days)
     as_of_outputs = _as_of_output_presence(outputs_dir, as_of_date)
@@ -253,9 +330,16 @@ def _check_window(
         as_of_date,
         required_future_end,
     )
-    guard_metadata = _guard_metadata_presence(
-        outputs_dir, as_of_date, horizon_days
-    )
+    if existing_validation:
+        guard_metadata = {
+            "status": "not_inspected_existing_validation_outputs",
+            "metadata_verified": False,
+            "outcome_fields_read": [],
+        }
+    else:
+        guard_metadata = _guard_metadata_presence(
+            outputs_dir, as_of_date, horizon_days
+        )
     member_snapshot = _member_snapshot_feasibility(
         as_of_outputs, validation_outputs, stock_cache, symbols
     )
@@ -646,15 +730,36 @@ def _next_manual_command(
             f"--cache-dir {config.cache_dir} --limit {config.limit}"
         )
     if readiness_status == "blocked_existing_unseen_outputs":
-        return "No command: audit whether this U1 window has already been consumed."
+        return "No command: audit whether this sealed window has already been consumed."
     if readiness_status == "blocked_missing_as_of_outputs":
         return (
             "No validation command: create the missing cache-only as-of artifacts, "
-            "then rerun Phase 2.19 readiness."
+            f"then rerun Phase {_window_set_spec(config.window_set)['phase']} readiness."
         )
     if readiness_status in {"blocked_stock_cache", "blocked_benchmark_cache"}:
-        return "No validation command: local cache coverage is incomplete; provider access is not allowed in Phase 2.19."
+        return (
+            "No validation command: local cache coverage is incomplete; "
+            f"provider access is not allowed in Phase {_window_set_spec(config.window_set)['phase']}."
+        )
     return "No command while this window is blocked."
+
+
+def _window_set_spec(window_set: str) -> dict[str, Any]:
+    try:
+        return WINDOW_SET_SPECS[window_set]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown window set: {window_set}. Expected one of: {', '.join(WINDOW_SET_NAMES)}"
+        ) from exc
+
+
+def _disclaimer(window_set: str) -> str:
+    if window_set == "u2-2025":
+        return (
+            "Readiness-only inspection. Preregistered U2 results remain sealed. "
+            "No unseen outcomes or performance metrics are read or computed."
+        )
+    return DISCLAIMER
 
 
 def _dedupe(values: Iterable[str]) -> list[str]:

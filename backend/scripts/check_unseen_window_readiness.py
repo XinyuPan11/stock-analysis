@@ -13,6 +13,8 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from stock_analysis.validation.unseen_window_readiness import (  # noqa: E402
+    DEFAULT_WINDOW_SET,
+    WINDOW_SET_NAMES,
     UnseenWindowReadinessConfig,
     check_unseen_window_readiness,
     write_unseen_window_readiness,
@@ -22,8 +24,8 @@ from stock_analysis.validation.unseen_window_readiness import (  # noqa: E402
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Check Phase 2.19 proposed U1 technical readiness without reading "
-            "unseen outcomes or accessing providers."
+            "Check a frozen U1 or U2 window set for technical readiness without "
+            "reading unseen outcomes or accessing providers."
         )
     )
     parser.add_argument("--outputs-dir", default=str(REPO_ROOT / "outputs"))
@@ -33,6 +35,12 @@ def main() -> int:
     parser.add_argument("--provider", default="baostock")
     parser.add_argument("--benchmark", default="CSI300")
     parser.add_argument("--limit", type=int, default=300)
+    parser.add_argument(
+        "--window-set",
+        choices=WINDOW_SET_NAMES,
+        default=DEFAULT_WINDOW_SET,
+        help="Frozen readiness window set. Default preserves Phase 2.19 U1 behavior.",
+    )
     parser.add_argument("--write-output", action="store_true")
     args = parser.parse_args()
 
@@ -42,6 +50,7 @@ def main() -> int:
         provider=args.provider,
         benchmark=args.benchmark,
         limit=args.limit,
+        window_set=args.window_set,
     )
     result = check_unseen_window_readiness(config)
     if args.write_output:
