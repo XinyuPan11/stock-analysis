@@ -11,8 +11,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from stock_analysis.validation.unseen_window_readiness import (
+    CONSUMED_U1_WINDOWS,
     FORBIDDEN_ANSWER_KEY_WINDOWS,
     PROPOSED_U1_WINDOWS,
+    PROPOSED_U2_WINDOWS,
     UnseenWindowReadinessConfig,
     check_unseen_window_readiness,
     markdown_unseen_window_readiness,
@@ -33,6 +35,109 @@ def test_proposed_u1_windows_are_accepted() -> None:
         result = validate_unseen_window_candidate(as_of_date, horizon_days)
         assert result["accepted"] is True
         assert result["candidate_status"] == "accepted_proposed_u1_candidate"
+
+
+def test_u2_2025_window_set_uses_only_preregistered_windows(tmp_path: Path) -> None:
+    result = check_unseen_window_readiness(_config(tmp_path, window_set="u2-2025"))
+
+    actual = tuple(
+        (item["as_of_date"], item["horizon_days"]) for item in result["windows"]
+    )
+    assert actual == PROPOSED_U2_WINDOWS
+    assert not (set(actual) & set(CONSUMED_U1_WINDOWS))
+    assert result["window_set"] == "u2-2025"
+    assert result["provider_access"] is False
+    assert result["outcomes_inspected"] is False
+
+
+def test_u2_rejects_consumed_u1_and_forbidden_answer_key_windows() -> None:
+    for as_of_date, horizon_days in CONSUMED_U1_WINDOWS:
+        result = validate_unseen_window_candidate(
+            as_of_date, horizon_days, window_set="u2-2025"
+        )
+        assert result["accepted"] is False
+        assert result["candidate_status"] == "rejected_consumed_u1_window"
+
+    for as_of_date, horizon_days in FORBIDDEN_ANSWER_KEY_WINDOWS:
+        result = validate_unseen_window_candidate(
+            as_of_date, horizon_days, window_set="u2-2025"
+        )
+        assert result["accepted"] is False
+        assert result["candidate_status"] == "rejected_forbidden_answer_key_window"
+
+
+def test_missing_u2_as_of_outputs_block_without_generation_or_fetch(
+    tmp_path: Path,
+) -> None:
+    result = check_unseen_window_readiness(_config(tmp_path, window_set="u2-2025"))
+
+    assert all(
+        item["readiness_status"] == "blocked_missing_as_of_outputs"
+        for item in result["windows"]
+    )
+    assert all(item["provider_access"] is False for item in result["windows"])
+    assert result["provider_fetch_executed"] is False
+    assert result["labels_calculated"] is False
+    assert result["future_returns_recomputed"] is False
+
+
+def test_ready_u2_fixture_is_not_deferred_by_2024_policy(tmp_path: Path) -> None:
+    for as_of_date, _ in PROPOSED_U2_WINDOWS:
+        _write_as_of_outputs(tmp_path / "outputs", as_of_date, ["sh.600000"])
+    _write_cache(
+        tmp_path / "cache",
+        "stock_daily",
+        "adjusted",
+        "sh.600000",
+        ["2024-01-02", "2026-06-24"],
+    )
+    _write_cache(
+        tmp_path / "cache",
+        "index_daily",
+        "raw",
+        "sh.000300",
+        ["2024-01-02", "2026-06-24"],
+    )
+
+    result = check_unseen_window_readiness(_config(tmp_path, window_set="u2-2025"))
+
+    assert all(item["readiness_status"] == "ready_for_dry_run" for item in result["windows"])
+    assert all(item["benchmark_cache"]["status"] == "covered" for item in result["windows"])
+    assert result["provider_access"] is False
+
+
+def test_existing_u2_summary_is_presence_checked_but_not_opened(tmp_path: Path) -> None:
+    as_of_date, horizon_days = PROPOSED_U2_WINDOWS[0]
+    output = (
+        tmp_path
+        / "outputs"
+        / "validation"
+        / f"walk_forward_summary_{as_of_date}_{horizon_days}d.json"
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("not valid json and must not be opened", encoding="utf-8")
+
+    result = check_unseen_window_readiness(_config(tmp_path, window_set="u2-2025"))
+    item = result["windows"][0]
+
+    assert item["readiness_status"] == "blocked_existing_unseen_outputs"
+    assert item["point_in_time_guard"]["status"] == "not_inspected_existing_validation_outputs"
+    assert item["point_in_time_guard"]["outcome_fields_read"] == []
+    assert result["outcomes_inspected"] is False
+
+
+def test_u2_readiness_has_no_performance_fields(tmp_path: Path) -> None:
+    result = check_unseen_window_readiness(_config(tmp_path, window_set="u2-2025"))
+    forbidden_keys = {
+        "average_future_return",
+        "average_excess_return",
+        "outperform_rate",
+        "winner_capture_rate",
+        "loser_contamination_rate",
+        "hypothesis_result",
+    }
+
+    assert not (_all_keys(result) & forbidden_keys)
 
 
 def test_missing_as_of_outputs_are_blocked_without_provider_access(
@@ -132,11 +237,29 @@ def test_report_guardrails_and_output_paths(tmp_path: Path) -> None:
     assert payload["provider_access"] is False
 
 
-def _config(root: Path) -> UnseenWindowReadinessConfig:
+def test_u2_report_guardrails_and_output_paths_are_separate(tmp_path: Path) -> None:
+    result = check_unseen_window_readiness(_config(tmp_path, window_set="u2-2025"))
+    markdown = markdown_unseen_window_readiness(result)
+
+    assert "U2 results remain sealed" in markdown
+    assert "readiness only, not validation" in markdown
+    assert "No unseen outcomes" in markdown
+    paths = write_unseen_window_readiness(result, tmp_path / "outputs")
+    assert Path(paths["json"]).name == "u2_window_readiness_2025.json"
+    assert Path(paths["markdown"]).name == "u2_window_readiness_2025.md"
+    assert Path(paths["json"]).name != "unseen_window_readiness_2024.json"
+
+
+def _config(
+    root: Path,
+    *,
+    window_set: str = "u1-2024",
+) -> UnseenWindowReadinessConfig:
     return UnseenWindowReadinessConfig(
         outputs_dir=root / "outputs",
         cache_dir=root / "cache",
         limit=300,
+        window_set=window_set,
     )
 
 
