@@ -845,10 +845,54 @@ def _lists_overview_html(payload: dict[str, Any]) -> str:
     return _page_shell("多榜单总览", body)
 
 
+def _defensive_positioning_html(payload: dict[str, Any] | None) -> str:
+    if not payload:
+        return ""
+    title = escape(str(payload.get("title") or "Research-only defensive observation"))
+    if not payload.get("available"):
+        message = escape(
+            str(payload.get("message") or "Defensive evidence unavailable.")
+        )
+        return f"""
+        <section class="notice">
+          <h2>{title}</h2>
+          <p>{message}</p>
+        </section>
+        """
+
+    badge = escape(str(payload.get("badge") or ""))
+    evidence = payload.get("evidence", {})
+    comparison_lists = ", ".join(
+        str(item) for item in _as_list(evidence.get("comparison_list_ids"))
+    )
+    return f"""
+    <section>
+      <div class="research-heading">
+        <h2>{title}</h2>
+        <span class="badge">{badge}</span>
+      </div>
+      <p><strong>{escape(str(payload.get("evidence_note") or ""))}</strong></p>
+      <p class="notice-text">{escape(str(payload.get("caveat") or ""))}</p>
+      <dl>
+        <dt>comparison_lists</dt><dd>{escape(comparison_lists)}</dd>
+        <dt>why included</dt><dd>{escape(str(payload.get("why_included") or ""))}</dd>
+        <dt>why not a recommendation</dt><dd>{escape(str(payload.get("why_not_a_recommendation") or ""))}</dd>
+        <dt>data limitations</dt><dd>{escape(str(payload.get("data_limitation") or ""))}</dd>
+      </dl>
+      <div class="research-caution">
+        {escape(str(payload.get("disclaimer") or ""))}
+      </div>
+    </section>
+    """
+
+
 def _list_detail_html(payload: dict[str, Any]) -> str:
     list_id = str(payload.get("list_id", ""))
     is_risk_list = list_id == "high_risk_active"
     risk_notice = "<p class=\"notice-text\">风险观察，不作为稳健候选。</p>" if is_risk_list else ""
+    defensive_section = _defensive_positioning_html(
+        payload.get("defensive_positioning")
+    )
     body = f"""
     <header class="topbar">
       <div>
@@ -879,6 +923,8 @@ def _list_detail_html(payload: dict[str, Any]) -> str:
       <h2>榜单股票</h2>
       {_list_items_table(payload.get("items", []))}
     </section>
+
+    {defensive_section}
 
     <p class="disclaimer">{escape(API_DISCLAIMER)}</p>
     """
@@ -1974,6 +2020,9 @@ a:hover { text-decoration: underline; }
 .muted { color: #667085; }
 .notice { border-color: #f0c36d; background: #fff8e6; }
 .risk-cell { max-width: 260px; }
+.research-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.research-heading h2 { margin: 0; }
+.research-caution { margin-top: 16px; border-left: 4px solid #d18b24; background: #fff8e6; padding: 12px; line-height: 1.6; }
 .report-frame { width: 100%; min-height: 680px; border: 1px solid #dde3ec; border-radius: 8px; background: #fff; }
 .report-section { padding: 12px; }
 .markdown-report { line-height: 1.7; }

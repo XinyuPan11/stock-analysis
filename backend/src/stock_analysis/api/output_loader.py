@@ -8,6 +8,10 @@ from pathlib import Path
 import re
 from typing import Any
 
+from stock_analysis.research.defensive_positioning import (
+    DEFENSIVE_POSITIONING_CONFIG,
+    build_defensive_positioning_display,
+)
 from stock_analysis.api.schemas import NO_DAILY_OUTPUT_MESSAGE, NO_STOCK_REPORT_MESSAGE
 
 
@@ -563,7 +567,7 @@ class OutputLoader:
             }
         items = payload.get("items", [])
         items = items if isinstance(items, list) else []
-        return {
+        result = {
             "ok": True,
             "message": "",
             "date": payload.get("as_of_date") or as_of_date,
@@ -580,6 +584,13 @@ class OutputLoader:
             "items": self._sanitize_payload(items),
             "disclaimer": API_DISCLAIMER,
         }
+        defensive_positioning = build_defensive_positioning_display(
+            normalized_id,
+            DEFENSIVE_POSITIONING_CONFIG,
+        )
+        if defensive_positioning is not None:
+            result["defensive_positioning"] = defensive_positioning
+        return result
 
     def get_labels(
         self,
