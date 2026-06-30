@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -644,6 +645,79 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["list_id"], "high_confidence_candidates")
         self.assertGreaterEqual(payload["item_count"], 1)
         self.assertEqual(payload["items"][0]["symbol"], "sh.600016")
+
+    def test_long_term_stable_api_adds_presentation_without_changing_items(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            list_path = Path(
+                temp_dir,
+                "lists",
+                "long_term_stable_2024-01-31.json",
+            )
+            source_items = json.loads(
+                list_path.read_text(encoding="utf-8")
+            )["items"]
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/lists/long_term_stable")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        display = payload["defensive_positioning"]
+        self.assertTrue(display["research_only"])
+        self.assertTrue(display["available"])
+        self.assertEqual(display["badge"], "Defensive observation")
+        self.assertEqual(payload["items"], source_items)
+        self.assertEqual(
+            [item["rank"] for item in payload["items"]],
+            [item["rank"] for item in source_items],
+        )
+
+    def test_long_term_stable_page_shows_research_only_defensive_wording(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/lists/long_term_stable")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Research-only defensive observation", response.text)
+        self.assertIn("Defensive observation", response.text)
+        self.assertIn("shallower drawdown than active lists", response.text)
+        self.assertIn("negative in 3/4 U2 windows", response.text)
+        self.assertIn("Not investment advice", response.text)
+        self.assertIn("No guaranteed return", response.text)
+        for wording in (
+            "guaranteed gain",
+            "safe stock",
+            "stable profit",
+            "must buy",
+            "validated alpha",
+            "risk-free",
+        ):
+            self.assertNotIn(wording, response.text.lower())
+
+    def test_missing_defensive_config_fails_closed_in_api_and_page(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            with patch(
+                "stock_analysis.api.output_loader.DEFENSIVE_POSITIONING_CONFIG",
+                None,
+            ):
+                api_response = client.get("/api/lists/long_term_stable")
+                page_response = client.get("/lists/long_term_stable")
+
+        display = api_response.json()["defensive_positioning"]
+        self.assertFalse(display["available"])
+        self.assertFalse(display["claim_supported"])
+        self.assertIsNone(display["badge"])
+        self.assertIn("Defensive evidence unavailable", page_response.text)
+        self.assertNotIn(
+            "<span class=\"badge\">Defensive observation</span>",
+            page_response.text,
+        )
 
     def test_empty_research_list_does_not_500(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
