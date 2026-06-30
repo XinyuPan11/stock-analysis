@@ -56,13 +56,26 @@ Before invoking the existing research pipeline, the generator:
 3. selects the requested symbols from that cached universe;
 4. requires complete stock cache coverage for the one-year feature lookback
    through the as-of date;
-5. resolves `CSI300` through established benchmark aliases and requires its
-   cache coverage;
+5. resolves `CSI300` through established benchmark aliases and requires
+   verified combined cache coverage;
 6. stops before writing outputs when any prerequisite is missing.
 
 `LocalCsvCache.market_data_coverage_details()` checks both coverage metadata
 and the actual CSV end date. Stale metadata cannot make a missing CSV range
 look complete.
+
+Benchmark history may be stitched from overlapping, metadata-consistent local
+segments such as:
+
+```text
+baostock/index_daily/raw/CSI300.csv
+baostock/stock_daily/adjusted/sh.000300.csv
+```
+
+The verified union must cover the complete feature lookback through the as-of
+date; a gap still fails closed. Phase 2.21 does not require future-label
+coverage because it generates as-of features only. Phase 2.19 separately
+checks benchmark coverage through the required future end before validation.
 
 The cache-only service deliberately returns physical cache rows after the
 as-of date to the existing research pipeline. The Phase 2.10 guard immediately
