@@ -131,8 +131,8 @@ def build_winner_loser_feature_attribution(
         dtype={"symbol": str, "as_of_date": str},
     )
     _validate_snapshot(frame)
-    prepared = _prepare_snapshot(frame)
-    groups, group_windows = _construct_groups(
+    prepared = prepare_snapshot_for_attribution(frame)
+    groups, group_windows = construct_winner_loser_groups(
         prepared,
         tail_fraction=config.tail_fraction,
         min_group_size=config.min_group_size,
@@ -377,7 +377,7 @@ def _validate_snapshot(frame: pd.DataFrame) -> None:
         )
 
 
-def _prepare_snapshot(frame: pd.DataFrame) -> pd.DataFrame:
+def prepare_snapshot_for_attribution(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy()
     result["as_of_date"] = result["as_of_date"].astype(str)
     result["horizon_days"] = pd.to_numeric(
@@ -402,7 +402,7 @@ def _prepare_snapshot(frame: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def _construct_groups(
+def construct_winner_loser_groups(
     frame: pd.DataFrame,
     *,
     tail_fraction: float,
