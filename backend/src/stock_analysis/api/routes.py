@@ -136,6 +136,12 @@ def lists_page(request: Request) -> HTMLResponse:
     return HTMLResponse(_lists_overview_html(get_loader(request).get_research_lists()))
 
 
+@router.get("/lists/tiers", response_class=HTMLResponse)
+def list_tiers_page(request: Request) -> HTMLResponse:
+    payload = get_loader(request).get_research_list_tiers()
+    return HTMLResponse(_candidate_tiers_html(payload))
+
+
 @router.get("/lists/{list_id}", response_class=HTMLResponse)
 def list_detail_page(request: Request, list_id: str) -> HTMLResponse:
     payload = get_loader(request).get_research_list(list_id)
@@ -425,6 +431,11 @@ def guide(request: Request) -> dict[str, Any]:
 @router.get("/api/lists")
 def research_lists(request: Request) -> dict[str, Any]:
     return get_loader(request).get_research_lists()
+
+
+@router.get("/api/lists/tiers")
+def research_list_tiers(request: Request) -> dict[str, Any]:
+    return get_loader(request).get_research_list_tiers()
 
 
 @router.get("/api/lists/{list_id}")
@@ -844,6 +855,117 @@ def _lists_overview_html(payload: dict[str, Any]) -> str:
     """
     return _page_shell("多榜单总览", body)
 
+
+def _candidate_tiers_html(payload: dict[str, Any]) -> str:
+    title = escape(str(payload.get("title") or "Research-only tiering"))
+    if not payload.get("available"):
+        body = f"""
+        <header class="topbar">
+          <div>
+            <a href="/lists" class="back-link">Back to research lists</a>
+            <h1>{title}</h1>
+          </div>
+          <span class="badge">Research-only</span>
+        </header>
+        <section class="notice">
+          <h2>Tier metadata unavailable</h2>
+          <p>{escape(str(payload.get("message") or "Tier metadata unavailable"))}</p>
+        </section>
+        """
+        return _page_shell("Research Candidate Tiers", body)
+
+    tier_sections = "".join(
+        _candidate_tier_section_html(tier)
+        for tier in _as_list(payload.get("tiers"))
+        if isinstance(tier, dict)
+    )
+    data_quality_state = payload.get("data_quality_state")
+    data_quality_section = ""
+    if isinstance(data_quality_state, dict):
+        source_list = data_quality_state.get("list", {})
+        if isinstance(source_list, dict):
+            data_quality_section = f"""
+            <section>
+              <div class="research-heading">
+                <h2>{escape(str(data_quality_state.get("status_name") or "Data insufficient"))}</h2>
+                <span class="status missing">Not a tier</span>
+              </div>
+              <p>This remains a separate data-quality state.</p>
+              {_tier_source_list_html(source_list)}
+            </section>
+            """
+
+    body = f"""
+    <header class="topbar">
+      <div>
+        <a href="/lists" class="back-link">Back to research lists</a>
+        <h1>Research Candidate Tiers</h1>
+        <p>{escape(str(payload.get("reading_order_note") or ""))}</p>
+      </div>
+      <span class="badge">Research-only tiering</span>
+    </header>
+
+    <section class="notice">
+      <p><strong>{escape(str(payload.get("unchanged_logic_note") or ""))}</strong></p>
+      <p>{escape(str(payload.get("disclaimer") or ""))}</p>
+    </section>
+
+    {tier_sections}
+    {data_quality_section}
+    """
+    return _page_shell("Research Candidate Tiers", body)
+
+
+def _candidate_tier_section_html(tier: dict[str, Any]) -> str:
+    source_lists = "".join(
+        _tier_source_list_html(source_list)
+        for source_list in _as_list(tier.get("lists"))
+        if isinstance(source_list, dict)
+    )
+    missing_ids = [
+        str(item) for item in _as_list(tier.get("missing_source_list_ids"))
+    ]
+    missing_note = (
+        f"<p class=\"notice-text\">Missing source lists: "
+        f"{escape(', '.join(missing_ids))}</p>"
+        if missing_ids
+        else ""
+    )
+    return f"""
+    <section>
+      <div class="research-heading">
+        <div>
+          <span class="muted">Tier {escape(str(tier.get("tier_order") or ""))}</span>
+          <h2>{escape(str(tier.get("tier_name") or ""))}</h2>
+        </div>
+        <span class="badge">{escape(str(tier.get("tier_badge") or ""))}</span>
+      </div>
+      <p>{escape(str(tier.get("tier_description") or ""))}</p>
+      <dl>
+        <dt>evidence</dt><dd>{escape(str(tier.get("evidence_note") or ""))}</dd>
+        <dt>caveat</dt><dd>{escape(str(tier.get("caveat") or ""))}</dd>
+        <dt>research boundary</dt><dd>{escape(str(tier.get("forbidden_action_note") or ""))}</dd>
+      </dl>
+      {missing_note}
+      {source_lists}
+    </section>
+    """
+
+
+def _tier_source_list_html(payload: dict[str, Any]) -> str:
+    list_id = escape(str(payload.get("list_id") or ""))
+    list_name = escape(str(payload.get("list_name") or list_id))
+    return f"""
+    <div class="tier-source-list">
+      <h3>{list_name}</h3>
+      <p class="muted">
+        <a href="/lists/{list_id}">{list_id}</a>
+        路 item_count={escape(str(payload.get("item_count", 0)))}
+      </p>
+      <p>{escape(str(payload.get("description") or ""))}</p>
+      {_list_items_table(payload.get("items", []))}
+    </div>
+    """
 
 def _defensive_positioning_html(payload: dict[str, Any] | None) -> str:
     if not payload:
@@ -1931,6 +2053,7 @@ def _global_nav() -> str:
         ("/", "Home"),
         ("/compare", "Compare"),
         ("/lists", "Lists"),
+        ("/lists/tiers", "Research Tiers"),
         ("/labels", "Labels"),
         ("/search", "Search"),
         ("/reports", "Reports"),
@@ -2020,6 +2143,8 @@ a:hover { text-decoration: underline; }
 .muted { color: #667085; }
 .notice { border-color: #f0c36d; background: #fff8e6; }
 .risk-cell { max-width: 260px; }
+.tier-source-list { margin-top: 18px; padding-top: 16px; border-top: 1px solid #e4e8ef; }
+.tier-source-list h3 { margin: 0 0 6px; font-size: 17px; }
 .research-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .research-heading h2 { margin: 0; }
 .research-caution { margin-top: 16px; border-left: 4px solid #d18b24; background: #fff8e6; padding: 12px; line-height: 1.6; }

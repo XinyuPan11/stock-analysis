@@ -633,6 +633,119 @@ class ApiTests(unittest.TestCase):
         self.assertIn("item_count", first)
         self.assertIn("items_preview", first)
 
+    def test_candidate_tiers_api_preserves_exact_mapping_and_source_lists(self) -> None:
+        expected_mapping = [
+            ("defensive_observation", ["long_term_stable"]),
+            ("core_research_candidates", ["high_confidence_candidates"]),
+            ("trend_observation", ["trend_leaders"]),
+            (
+                "active_opportunity_observation",
+                ["breakout_watch", "accumulation_watch", "rebound_watch"],
+            ),
+            ("risk_warning", ["high_risk_active"]),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            source_payloads = {
+                list_id: json.loads(
+                    Path(
+                        temp_dir,
+                        "lists",
+                        f"{list_id}_2024-01-31.json",
+                    ).read_text(encoding="utf-8")
+                )
+                for _, list_ids in expected_mapping
+                for list_id in list_ids
+            }
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/api/lists/tiers")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["research_only"])
+        self.assertEqual(
+            [
+                (tier["tier_id"], tier["source_list_ids"])
+                for tier in payload["tiers"]
+            ],
+            expected_mapping,
+        )
+        for tier in payload["tiers"]:
+            for source_list in tier["lists"]:
+                original = source_payloads[source_list["list_id"]]
+                self.assertEqual(source_list["list_name"], original["list_name"])
+                self.assertEqual(source_list["items"], original["items"])
+                self.assertEqual(
+                    [item["rank"] for item in source_list["items"]],
+                    [item["rank"] for item in original["items"]],
+                )
+        tiered_ids = {
+            list_id
+            for tier in payload["tiers"]
+            for list_id in tier["source_list_ids"]
+        }
+        self.assertNotIn("insufficient_data", tiered_ids)
+        self.assertFalse(payload["data_quality_state"]["tiered"])
+
+    def test_candidate_tiers_page_has_required_safe_wording(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            response = client.get("/lists/tiers")
+
+        self.assertEqual(response.status_code, 200)
+        for wording in (
+            "Research-only tiering",
+            "Not investment advice",
+            "Not a buy recommendation",
+            "No guaranteed return",
+            "Tier numbers indicate reading order only",
+            "Existing list logic is unchanged",
+            "Defensive Observation",
+            "Core Research Candidates",
+            "Trend Observation",
+            "Active Opportunity Observation",
+            "Risk Warning",
+        ):
+            self.assertIn(wording, response.text)
+        for wording in (
+            "guaranteed gain",
+            "stable profit",
+            "must buy",
+            "safe stock",
+            "validated alpha",
+            "production recommendation",
+            "risk-free",
+            "automatic exclusion",
+            "confirmed short signal",
+            "confirmed avoid signal",
+        ):
+            self.assertNotIn(wording, response.text.lower())
+
+    def test_missing_candidate_tier_metadata_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _write_outputs(temp_dir)
+            client = TestClient(create_app(outputs_dir=temp_dir))
+
+            with patch(
+                "stock_analysis.api.output_loader.CANDIDATE_TIERING_CONFIG",
+                None,
+            ):
+                api_response = client.get("/api/lists/tiers")
+                page_response = client.get("/lists/tiers")
+
+        payload = api_response.json()
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["status"], "tier_metadata_unavailable")
+        self.assertEqual(payload["message"], "Tier metadata unavailable")
+        self.assertEqual(payload["tiers"], [])
+        self.assertIn("Tier metadata unavailable", page_response.text)
+        self.assertNotIn("Defensive Observation", page_response.text)
+
     def test_research_list_detail_returns_specific_list(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             _write_outputs(temp_dir)
