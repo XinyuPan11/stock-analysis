@@ -119,6 +119,48 @@ COHORT_CAVEATS: dict[str, str] = {
 }
 
 
+CONFIG_VALIDATION_MODES = {"execution", "template"}
+
+REQUIRED_FORBIDDEN_DATA_SOURCES: frozenset[str] = frozenset(
+    {
+        "future_returns",
+        "future_highs_or_lows",
+        "realized_labels",
+        "winner_or_loser_status",
+        "case_study_answers",
+        "u1_or_u2_performance_outcomes",
+        "unavailable_external_historical_data",
+    }
+)
+
+REQUIRED_EXCLUDED_CONSUMED_EVIDENCE: frozenset[str] = frozenset(
+    {
+        "2024_answer_key_windows",
+        "u1_windows",
+        "u2_windows",
+    }
+)
+
+PLACEHOLDER_VALUES: frozenset[str] = frozenset(
+    {
+        "",
+        "replace-before-use",
+        "yyyy-mm-dd",
+        "tbd",
+        "todo",
+    }
+)
+
+FORBIDDEN_TUNING_KEY_PATTERN = re.compile(
+    r"((tuned|calibrated|optimized|fitted|fit).*(u1|u2|answer_?key)"
+    r"|(u1|u2|answer_?key).*(tuned|calibrated|optimized|fitted|fit))",
+    re.IGNORECASE,
+)
+FORBIDDEN_DEFAULT_KEY_PATTERN = re.compile(
+    r"(^|_)(default|defaults)($|_)",
+    re.IGNORECASE,
+)
+
 class OpportunityCohortBuildError(ValueError):
     def __init__(
         self,
@@ -196,7 +238,11 @@ def build_research_opportunity_cohorts(
     source_snapshot_path: str | Path,
     config_path: str | Path,
 ) -> OpportunityCohortBuildResult:
-    resolved_config = _validate_config(config, as_of_date)
+    resolved_config = validate_opportunity_cohort_config(
+        config,
+        as_of_date=as_of_date,
+        mode="execution",
+    )
     volatility_field = str(
         resolved_config["feature_bindings"]["volatility_20d"]
     )
@@ -319,7 +365,15 @@ def build_research_opportunity_cohorts(
             "source_snapshot_path": str(Path(source_snapshot_path)),
             "config_path": str(Path(config_path)),
             "config_version": str(resolved_config["config_version"]),
+            "created_for_phase": str(resolved_config["created_for_phase"]),
             "parameter_source": str(resolved_config["parameter_source"]),
+            "config_validation_mode": "execution",
+            "holdout_id": str(
+                resolved_config["preregistration"][
+                    "intended_future_validation_holdout"
+                ]["holdout_id"]
+            ),
+
             "cohort_count": len(COHORT_ROLES),
             "input_row_count": len(selected),
             "output_record_count": len(output),
@@ -369,31 +423,79 @@ def write_research_opportunity_cohort_outputs(
     }
 
 
-def _validate_config(
+def validate_opportunity_cohort_config(
     config: Mapping[str, Any] | None,
-    as_of_date: str,
+    *,
+    as_of_date: str | None = None,
+    mode: str = "execution",
 ) -> dict[str, Any]:
+    if mode not in CONFIG_VALIDATION_MODES:
+        raise OpportunityCohortBuildError(
+            "blocked_invalid_config_mode",
+            f"Unsupported config validation mode: {mode}.",
+        )
     if not isinstance(config, Mapping):
         raise OpportunityCohortBuildError(
             "blocked_missing_config",
             "An explicit research-only config is required.",
         )
+    _reject_forbidden_tuning_flags(config)
     if config.get("research_only") is not True:
         raise OpportunityCohortBuildError(
             "blocked_invalid_config",
             "Config must declare research_only=true.",
         )
-    for field in ("config_version", "parameter_source", "as_of_date"):
+    if config.get("labels_joined") is not False:
+        raise OpportunityCohortBuildError(
+            "blocked_invalid_config",
+            "Config must declare labels_joined=false.",
+        )
+    if config.get("production_change") is not False:
+        raise OpportunityCohortBuildError(
+            "blocked_invalid_config",
+            "Config must declare production_change=false.",
+        )
+    for field in (
+        "config_version",
+        "created_for_phase",
+        "parameter_source",
+        "as_of_date",
+    ):
         if not str(config.get(field, "")).strip():
             raise OpportunityCohortBuildError(
                 "blocked_invalid_config",
                 f"Config is missing required field: {field}.",
             )
-    if str(config["as_of_date"]) != as_of_date:
+    if mode == "execution":
+        for field in (
+            "config_version",
+            "created_for_phase",
+            "parameter_source",
+            "as_of_date",
+        ):
+            if _is_placeholder(config[field]):
+                raise OpportunityCohortBuildError(
+                    "blocked_template_config_execution",
+                    f"Runnable config contains a placeholder: {field}.",
+                )
+        template_status = str(config.get("template_status", "")).lower()
+        if "non_runnable" in template_status:
+            raise OpportunityCohortBuildError(
+                "blocked_template_config_execution",
+                "A non-runnable template cannot be used for execution.",
+            )
+    if as_of_date is not None and str(config["as_of_date"]) != as_of_date:
         raise OpportunityCohortBuildError(
             "blocked_config_as_of_mismatch",
             "Config as_of_date does not match the requested as_of_date.",
         )
+    if mode == "execution":
+        parsed_as_of = pd.to_datetime(config["as_of_date"], errors="coerce")
+        if pd.isna(parsed_as_of):
+            raise OpportunityCohortBuildError(
+                "blocked_invalid_config",
+                "Runnable config as_of_date must be a valid date.",
+            )
     feature_bindings = config.get("feature_bindings")
     if not isinstance(feature_bindings, Mapping):
         raise OpportunityCohortBuildError(
@@ -406,6 +508,45 @@ def _validate_config(
             "blocked_invalid_config",
             "volatility_20d must bind to an allowed as-of field.",
         )
+    preregistration = config.get("preregistration")
+    if not isinstance(preregistration, Mapping):
+        raise OpportunityCohortBuildError(
+            "blocked_missing_preregistration",
+            "Config must include preregistration governance.",
+        )
+    forbidden_sources = preregistration.get("forbidden_data_sources")
+    if not isinstance(forbidden_sources, list):
+        raise OpportunityCohortBuildError(
+            "blocked_invalid_preregistration",
+            "preregistration.forbidden_data_sources must be a list.",
+        )
+    normalized_sources = {
+        str(item).strip().lower() for item in forbidden_sources
+    }
+    missing_forbidden_sources = sorted(
+        REQUIRED_FORBIDDEN_DATA_SOURCES - normalized_sources
+    )
+    if missing_forbidden_sources:
+        raise OpportunityCohortBuildError(
+            "blocked_invalid_preregistration",
+            "Config omits required forbidden data-source categories.",
+            details={
+                "missing_forbidden_data_sources": missing_forbidden_sources,
+            },
+        )
+    holdout = preregistration.get("intended_future_validation_holdout")
+    if not isinstance(holdout, Mapping):
+        raise OpportunityCohortBuildError(
+            "blocked_missing_holdout_contract",
+            "Config must include an intended future holdout contract.",
+        )
+    if mode == "execution":
+        if preregistration.get("status") != "preregistered_unopened":
+            raise OpportunityCohortBuildError(
+                "blocked_unfrozen_preregistration",
+                "Runnable config must have status=preregistered_unopened.",
+            )
+        _validate_runnable_holdout(holdout)
     cohorts = config.get("cohorts")
     if not isinstance(cohorts, Mapping) or set(cohorts) != set(COHORT_ROLES):
         raise OpportunityCohortBuildError(
@@ -432,6 +573,8 @@ def _validate_config(
                 f"Config parameters are incomplete for cohort: {cohort_id}.",
             )
         for name, value in parameters.items():
+            if value is None and mode == "template":
+                continue
             if (
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
@@ -444,6 +587,105 @@ def _validate_config(
                 )
     return dict(config)
 
+
+def _validate_runnable_holdout(holdout: Mapping[str, Any]) -> None:
+    for field in (
+        "holdout_id",
+        "benchmark",
+        "universe_definition",
+        "replacement_policy",
+    ):
+        if _is_placeholder(holdout.get(field)):
+            raise OpportunityCohortBuildError(
+                "blocked_missing_holdout_contract",
+                f"Runnable holdout is missing a concrete field: {field}.",
+            )
+    windows = holdout.get("window_ids")
+    if (
+        not isinstance(windows, list)
+        or not windows
+        or any(_is_placeholder(item) for item in windows)
+    ):
+        raise OpportunityCohortBuildError(
+            "blocked_missing_holdout_contract",
+            "Runnable holdout must list unopened window_ids.",
+        )
+    for field in (
+        "horizon_days",
+        "minimum_valid_sample_per_window",
+        "minimum_valid_sample_per_cohort",
+    ):
+        value = holdout.get(field)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) <= 0
+        ):
+            raise OpportunityCohortBuildError(
+                "blocked_missing_holdout_contract",
+                f"Runnable holdout requires a positive finite {field}.",
+            )
+    rules = holdout.get("success_failure_rules")
+    if not isinstance(rules, list) or not rules:
+        raise OpportunityCohortBuildError(
+            "blocked_missing_holdout_contract",
+            "Runnable holdout must define success_failure_rules.",
+        )
+    excluded = holdout.get("excluded_consumed_evidence")
+    if not isinstance(excluded, list):
+        excluded = []
+    missing_exclusions = sorted(
+        REQUIRED_EXCLUDED_CONSUMED_EVIDENCE
+        - {str(item).strip().lower() for item in excluded}
+    )
+    if missing_exclusions:
+        raise OpportunityCohortBuildError(
+            "blocked_missing_holdout_contract",
+            "Runnable holdout must exclude consumed answer-key/U1/U2 evidence.",
+            details={"missing_consumed_evidence_exclusions": missing_exclusions},
+        )
+
+
+def _reject_forbidden_tuning_flags(config: Mapping[str, Any]) -> None:
+    forbidden_paths: list[str] = []
+    hidden_default_paths: list[str] = []
+
+    def visit(value: Any, path: str) -> None:
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                normalized = str(key).strip().lower().replace("-", "_")
+                child_path = f"{path}.{key}" if path else str(key)
+                if FORBIDDEN_TUNING_KEY_PATTERN.search(normalized):
+                    forbidden_paths.append(child_path)
+                if FORBIDDEN_DEFAULT_KEY_PATTERN.search(normalized):
+                    hidden_default_paths.append(child_path)
+                visit(item, child_path)
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                visit(item, f"{path}[{index}]")
+
+    visit(config, "")
+    if forbidden_paths:
+        raise OpportunityCohortBuildError(
+            "blocked_forbidden_tuning_source",
+            "Config contains a forbidden outcome-tuning flag.",
+            details={"forbidden_tuning_flags": sorted(forbidden_paths)},
+        )
+    if hidden_default_paths:
+        raise OpportunityCohortBuildError(
+            "blocked_hidden_defaults",
+            "Config contains a hidden default field.",
+            details={"hidden_default_fields": sorted(hidden_default_paths)},
+        )
+
+def _is_placeholder(value: Any) -> bool:
+    if value is None:
+        return True
+    normalized = str(value).strip().lower()
+    return normalized in PLACEHOLDER_VALUES or normalized.startswith(
+        "replace-before-use"
+    )
 
 def _reject_forbidden_columns(columns: Any) -> None:
     forbidden = sorted(
