@@ -15,7 +15,7 @@ snapshots, or generate H1-H5 cohort outputs.
 Phase 3.7 expects one source file per historical date:
 
 ```text
-outputs/experiments/member_level_asof_snapshot_<date>.csv
+outputs/experiments/historical_h1h5_source_snapshot_<date>.csv
 ```
 
 None of the five files exists. Phase 3.7 therefore correctly returns
@@ -60,7 +60,7 @@ values.
 ### Path
 
 ```text
-outputs/experiments/member_level_asof_snapshot_<date>.csv
+outputs/experiments/historical_h1h5_source_snapshot_<date>.csv
 ```
 
 The source filename must contain the exact preregistered date.

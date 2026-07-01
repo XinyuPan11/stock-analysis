@@ -57,7 +57,7 @@ def test_existing_safe_source_snapshot_is_detected(
         repo_root
         / "outputs"
         / "experiments"
-        / f"member_level_asof_snapshot_{AS_OF_DATE}.csv"
+        / f"historical_h1h5_source_snapshot_{AS_OF_DATE}.csv"
     )
     _write_source_snapshot(source_path, AS_OF_DATE, row_count=100)
 
@@ -78,7 +78,7 @@ def test_source_snapshot_with_outcome_header_is_unsafe(
         repo_root
         / "outputs"
         / "experiments"
-        / f"member_level_asof_snapshot_{AS_OF_DATE}.csv"
+        / f"historical_h1h5_source_snapshot_{AS_OF_DATE}.csv"
     )
     _write_source_snapshot(
         source_path,

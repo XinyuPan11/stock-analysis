@@ -311,7 +311,7 @@ def check_historical_readiness(
             root
             / "outputs"
             / "experiments"
-            / f"member_level_asof_snapshot_{date}.csv",
+            / f"historical_h1h5_source_snapshot_{date}.csv",
         )
         windows.append(
             check_historical_window_readiness(
