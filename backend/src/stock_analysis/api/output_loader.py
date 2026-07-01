@@ -8,6 +8,11 @@ from pathlib import Path
 import re
 from typing import Any
 
+from stock_analysis.research.candidate_tiering import (
+    CANDIDATE_TIERING_CONFIG,
+    TIER_SOURCE_LIST_IDS,
+    build_candidate_tiering_display,
+)
 from stock_analysis.research.defensive_positioning import (
     DEFENSIVE_POSITIONING_CONFIG,
     build_defensive_positioning_display,
@@ -535,6 +540,19 @@ class OutputLoader:
             "lists": self._sanitize_payload(lists),
             "disclaimer": API_DISCLAIMER,
         }
+
+    def get_research_list_tiers(self) -> dict[str, Any]:
+        source_lists = {
+            list_id: self.get_research_list(list_id)
+            for list_id in TIER_SOURCE_LIST_IDS
+        }
+        source_lists["insufficient_data"] = self.get_research_list(
+            "insufficient_data"
+        )
+        return build_candidate_tiering_display(
+            source_lists,
+            CANDIDATE_TIERING_CONFIG,
+        )
 
     def get_research_list(self, list_id: str) -> dict[str, Any]:
         normalized_id = list_id.strip()
