@@ -1,0 +1,203 @@
+{
+  "template_status": "draft_not_preregistered_non_runnable",
+  "research_only": true,
+  "labels_joined": false,
+  "production_change": false,
+  "config_version": "replace-before-use",
+  "created_for_phase": "Phase 2.38",
+  "as_of_date": "YYYY-MM-DD",
+  "parameter_source": "documented_before_unopened_holdout",
+  "feature_bindings": {
+    "volatility_20d": "technical_volatility_20d"
+  },
+  "preregistration": {
+    "status": "draft_not_preregistered",
+    "created_at": "YYYY-MM-DD",
+    "created_by": "replace-before-use",
+    "rationale_document": "replace-before-use",
+    "cohort_definition_version": "phase2.36",
+    "source_snapshot_schema_version": "replace-before-use",
+    "forbidden_data_sources": [
+      "future_returns",
+      "future_highs_or_lows",
+      "realized_labels",
+      "winner_or_loser_status",
+      "case_study_answers",
+      "u1_or_u2_performance_outcomes",
+      "2024_answer_key_or_attribution_outcomes",
+      "unavailable_external_historical_data",
+      "later_or_reconstructed_future_membership"
+    ],
+    "intended_future_validation_holdout": {
+      "status": "must_be_preregistered_before_builder_output",
+      "holdout_id": "replace-before-use",
+      "window_ids": [],
+      "horizon_days": null,
+      "benchmark": null,
+      "universe_definition": null,
+      "minimum_valid_sample_per_window": null,
+      "minimum_valid_sample_per_cohort": null,
+      "success_failure_rules": [],
+      "replacement_policy": "preregister_before_outcome_inspection",
+      "excluded_consumed_evidence": [
+        "2024_answer_key_windows",
+        "u1_windows",
+        "u2_windows"
+      ]
+    },
+    "amendment_policy": {
+      "frozen_config_is_immutable": true,
+      "revision_requires_new_config_version": true,
+      "revision_requires_new_unopened_holdout": true,
+      "same_holdout_retuning_forbidden": true,
+      "failed_and_mixed_results_retained": true
+    }
+  },
+  "parameter_documentation": {
+    "low_position_revaluation_watch": {
+      "max_distance_to_60d_low": {
+        "direction": "less_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "replace-before-use"
+      },
+      "max_drawdown_60d": {
+        "direction": "less_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "replace-before-use"
+      },
+      "min_recent_acceleration_proxy": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return_proxy",
+        "rationale": "replace-before-use"
+      },
+      "min_activity_change_20d": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_change",
+        "rationale": "replace-before-use"
+      }
+    },
+    "trend_acceleration_with_crowding_guard": {
+      "min_recent_acceleration_proxy": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return_proxy",
+        "rationale": "replace-before-use"
+      },
+      "min_pre_20d_return": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "replace-before-use"
+      },
+      "min_crowding_proxy": {
+        "direction": "greater_than_or_equal",
+        "unit": "proxy_value",
+        "rationale": "replace-before-use"
+      },
+      "min_distance_to_60d_high": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "replace-before-use"
+      }
+    },
+    "right_tail_opportunity_watch": {
+      "min_volatility_20d": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_volatility",
+        "rationale": "replace-before-use"
+      },
+      "min_recent_acceleration_proxy": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return_proxy",
+        "rationale": "replace-before-use"
+      },
+      "min_activity_change_20d": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_change",
+        "rationale": "replace-before-use"
+      }
+    },
+    "high_position_crowding_risk": {
+      "min_distance_to_60d_high": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "replace-before-use"
+      },
+      "min_crowding_proxy": {
+        "direction": "greater_than_or_equal",
+        "unit": "proxy_value",
+        "rationale": "replace-before-use"
+      },
+      "min_volatility_20d": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_volatility",
+        "rationale": "replace-before-use"
+      }
+    },
+    "false_breakout_risk": {
+      "min_distance_to_60d_high": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "replace-before-use"
+      },
+      "max_recent_acceleration_proxy": {
+        "direction": "less_than_or_equal",
+        "unit": "decimal_return_proxy",
+        "rationale": "replace-before-use"
+      },
+      "max_drawdown_60d": {
+        "direction": "less_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "replace-before-use"
+      },
+      "min_activity_change_20d": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_change",
+        "rationale": "replace-before-use"
+      }
+    }
+  },
+  "cohorts": {
+    "low_position_revaluation_watch": {
+      "role": "opportunity_observation",
+      "parameters": {
+        "max_distance_to_60d_low": null,
+        "max_drawdown_60d": null,
+        "min_recent_acceleration_proxy": null,
+        "min_activity_change_20d": null
+      }
+    },
+    "trend_acceleration_with_crowding_guard": {
+      "role": "opportunity_observation",
+      "parameters": {
+        "min_recent_acceleration_proxy": null,
+        "min_pre_20d_return": null,
+        "min_crowding_proxy": null,
+        "min_distance_to_60d_high": null
+      }
+    },
+    "right_tail_opportunity_watch": {
+      "role": "opportunity_observation",
+      "parameters": {
+        "min_volatility_20d": null,
+        "min_recent_acceleration_proxy": null,
+        "min_activity_change_20d": null
+      }
+    },
+    "high_position_crowding_risk": {
+      "role": "risk_annotation",
+      "parameters": {
+        "min_distance_to_60d_high": null,
+        "min_crowding_proxy": null,
+        "min_volatility_20d": null
+      }
+    },
+    "false_breakout_risk": {
+      "role": "risk_annotation",
+      "parameters": {
+        "min_distance_to_60d_high": null,
+        "max_recent_acceleration_proxy": null,
+        "max_drawdown_60d": null,
+        "min_activity_change_20d": null
+      }
+    }
+  }
+}
