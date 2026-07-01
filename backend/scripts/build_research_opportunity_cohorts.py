@@ -19,6 +19,7 @@ from stock_analysis.research.opportunity_cohorts import (  # noqa: E402
     build_research_opportunity_cohorts,
     load_opportunity_cohort_config,
     load_opportunity_snapshot,
+    validate_opportunity_cohort_config,
     write_research_opportunity_cohort_outputs,
 )
 
@@ -30,8 +31,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "point-in-time snapshot. No provider or validation access."
         )
     )
-    parser.add_argument("--snapshot-file", required=True)
-    parser.add_argument("--as-of-date", required=True)
+    parser.add_argument("--snapshot-file")
+    parser.add_argument("--as-of-date")
     parser.add_argument("--config", required=True)
     parser.add_argument(
         "--outputs-dir",
@@ -48,17 +49,69 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Write separate research JSON and CSV outputs.",
     )
+    mode.add_argument(
+        "--schema-check-only",
+        action="store_true",
+        help=(
+            "Validate template governance and parameter keys without making "
+            "the config runnable or loading a snapshot."
+        ),
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        snapshot = load_opportunity_snapshot(args.snapshot_file)
         config = load_opportunity_cohort_config(args.config)
+        if args.schema_check_only:
+            validated = validate_opportunity_cohort_config(
+                config,
+                mode="template",
+            )
+            parameter_values = [
+                value
+                for cohort in validated["cohorts"].values()
+                for value in cohort["parameters"].values()
+            ]
+            print(
+                json.dumps(
+                    {
+                        "status": "schema_valid_template",
+                        "schema_validation_mode": "template",
+                        "runnable": False,
+                        "research_only": True,
+                        "provider_access": False,
+                        "labels_joined": False,
+                        "production_change": False,
+                        "config_version": validated["config_version"],
+                        "parameter_count": len(parameter_values),
+                        "null_parameter_count": sum(
+                            value is None for value in parameter_values
+                        ),
+                        "snapshot_loaded": False,
+                        "outputs_written": False,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if not args.snapshot_file or not args.as_of_date:
+            raise OpportunityCohortBuildError(
+                "blocked_missing_execution_argument",
+                "Normal dry-run/write-output requires --snapshot-file and "
+                "--as-of-date.",
+            )
+        validated_config = validate_opportunity_cohort_config(
+            config,
+            as_of_date=args.as_of_date,
+            mode="execution",
+        )
+        snapshot = load_opportunity_snapshot(args.snapshot_file)
         result = build_research_opportunity_cohorts(
             snapshot,
-            config,
+            validated_config,
             as_of_date=args.as_of_date,
             source_snapshot_path=args.snapshot_file,
             config_path=args.config,
@@ -75,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
                     "labels_joined": False,
                     "production_change": False,
                     "as_of_date": args.as_of_date,
+                    "schema_check_only": args.schema_check_only,
                     "dry_run": not args.write_output,
                 },
                 ensure_ascii=False,
@@ -86,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     metadata = result.report["metadata"]
     payload: dict[str, object] = {
         **metadata,
+        "schema_check_only": False,
         "dry_run": not args.write_output,
         "cohorts": result.report["cohorts"],
     }
@@ -96,7 +151,6 @@ def main(argv: list[str] | None = None) -> int:
         )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -20,11 +20,238 @@ from stock_analysis.research.opportunity_cohorts import (
     OpportunityCohortBuildError,
     build_research_opportunity_cohorts,
     load_opportunity_cohort_config,
+    validate_opportunity_cohort_config,
     write_research_opportunity_cohort_outputs,
 )
 
 
 AS_OF_DATE = "2026-03-31"
+
+
+def test_preregistration_template_passes_template_check_but_not_execution() -> None:
+    template_path = (
+        ROOT.parent
+        / "research"
+        / "configs"
+        / "opportunity_cohorts.preregistration.template.json"
+    )
+    config = load_opportunity_cohort_config(template_path)
+
+    validated = validate_opportunity_cohort_config(config, mode="template")
+    parameter_values = [
+        value
+        for cohort in validated["cohorts"].values()
+        for value in cohort["parameters"].values()
+    ]
+
+    assert len(parameter_values) == 18
+    assert all(value is None for value in parameter_values)
+    with pytest.raises(OpportunityCohortBuildError) as execution:
+        validate_opportunity_cohort_config(
+            config,
+            as_of_date=AS_OF_DATE,
+            mode="execution",
+        )
+    assert execution.value.status == "blocked_template_config_execution"
+
+
+
+def test_null_parameter_fails_execution_mode() -> None:
+    config = _config()
+    config["cohorts"]["right_tail_opportunity_watch"]["parameters"][
+        "min_volatility_20d"
+    ] = None
+
+    with pytest.raises(OpportunityCohortBuildError) as exc_info:
+        validate_opportunity_cohort_config(
+            config,
+            as_of_date=AS_OF_DATE,
+            mode="execution",
+        )
+
+    assert exc_info.value.status == "blocked_missing_frozen_parameter"
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["config_version", "created_for_phase", "parameter_source"],
+)
+def test_missing_required_metadata_fails(field: str) -> None:
+    config = _config()
+    del config[field]
+
+    with pytest.raises(OpportunityCohortBuildError) as exc_info:
+        validate_opportunity_cohort_config(config, mode="execution")
+
+    assert exc_info.value.status == "blocked_invalid_config"
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("research_only", False),
+        ("labels_joined", True),
+        ("production_change", True),
+    ],
+)
+def test_required_safety_flags_fail_closed(
+    field: str,
+    invalid_value: bool,
+) -> None:
+    config = _config()
+    config[field] = invalid_value
+
+    with pytest.raises(OpportunityCohortBuildError) as exc_info:
+        validate_opportunity_cohort_config(config, mode="execution")
+
+    assert exc_info.value.status == "blocked_invalid_config"
+
+
+def test_missing_and_nonnumeric_parameters_fail_without_defaults() -> None:
+    missing = _config()
+    del missing["cohorts"]["low_position_revaluation_watch"]["parameters"][
+        "max_drawdown_60d"
+    ]
+    with pytest.raises(OpportunityCohortBuildError) as missing_error:
+        validate_opportunity_cohort_config(missing, mode="execution")
+    assert missing_error.value.status == "blocked_missing_frozen_parameter"
+    assert "max_drawdown_60d" not in missing["cohorts"][
+        "low_position_revaluation_watch"
+    ]["parameters"]
+
+    nonnumeric = _config()
+    nonnumeric["cohorts"]["high_position_crowding_risk"]["parameters"][
+        "min_crowding_proxy"
+    ] = "use-default"
+    with pytest.raises(OpportunityCohortBuildError) as nonnumeric_error:
+        validate_opportunity_cohort_config(nonnumeric, mode="execution")
+    assert nonnumeric_error.value.status == "blocked_missing_frozen_parameter"
+
+
+@pytest.mark.parametrize(
+    "flag",
+    ["tuned_from_u1", "tuned_from_u2", "tuned_from_answer_key"],
+)
+def test_forbidden_tuning_flags_fail(flag: str) -> None:
+    config = _config()
+    config[flag] = False
+
+    with pytest.raises(OpportunityCohortBuildError) as exc_info:
+        validate_opportunity_cohort_config(config, mode="execution")
+
+    assert exc_info.value.status == "blocked_forbidden_tuning_source"
+    assert flag in exc_info.value.details["forbidden_tuning_flags"]
+
+
+def test_hidden_default_fields_are_rejected() -> None:
+    config = _config()
+    config["parameter_defaults"] = {"min_volatility_20d": 0.10}
+
+    with pytest.raises(OpportunityCohortBuildError) as exc_info:
+        validate_opportunity_cohort_config(config, mode="execution")
+
+    assert exc_info.value.status == "blocked_hidden_defaults"
+    assert exc_info.value.details["hidden_default_fields"] == [
+        "parameter_defaults"
+    ]
+
+def test_missing_forbidden_sources_and_holdout_contract_fail() -> None:
+    missing_source = _config()
+    missing_source["preregistration"]["forbidden_data_sources"].remove(
+        "future_returns"
+    )
+    with pytest.raises(OpportunityCohortBuildError) as source_error:
+        validate_opportunity_cohort_config(missing_source, mode="execution")
+    assert source_error.value.status == "blocked_invalid_preregistration"
+
+    missing_holdout = _config()
+    del missing_holdout["preregistration"][
+        "intended_future_validation_holdout"
+    ]
+    with pytest.raises(OpportunityCohortBuildError) as holdout_error:
+        validate_opportunity_cohort_config(missing_holdout, mode="execution")
+    assert holdout_error.value.status == "blocked_missing_holdout_contract"
+
+
+def test_valid_synthetic_config_passes_execution_schema() -> None:
+    validated = validate_opportunity_cohort_config(
+        _config(),
+        as_of_date=AS_OF_DATE,
+        mode="execution",
+    )
+
+    assert validated["research_only"] is True
+    assert validated["labels_joined"] is False
+    assert validated["production_change"] is False
+
+
+def test_cli_normal_dry_run_rejects_template_before_snapshot_load(
+    tmp_path: Path,
+) -> None:
+    template_path = (
+        ROOT.parent
+        / "research"
+        / "configs"
+        / "opportunity_cohorts.preregistration.template.json"
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "build_research_opportunity_cohorts.py"),
+            "--snapshot-file",
+            str(tmp_path / "must-not-be-loaded.csv"),
+            "--as-of-date",
+            AS_OF_DATE,
+            "--config",
+            str(template_path),
+            "--dry-run",
+        ],
+        cwd=ROOT.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    payload = json.loads(completed.stdout)
+    assert payload["status"] == "blocked_template_config_execution"
+    assert payload["provider_access"] is False
+    assert payload["labels_joined"] is False
+    assert payload["production_change"] is False
+
+def test_cli_schema_check_does_not_load_snapshot_or_write_outputs() -> None:
+    template_path = (
+        ROOT.parent
+        / "research"
+        / "configs"
+        / "opportunity_cohorts.preregistration.template.json"
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "build_research_opportunity_cohorts.py"),
+            "--config",
+            str(template_path),
+            "--schema-check-only",
+        ],
+        cwd=ROOT.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["status"] == "schema_valid_template"
+    assert payload["schema_validation_mode"] == "template"
+    assert payload["runnable"] is False
+    assert payload["parameter_count"] == 18
+    assert payload["null_parameter_count"] == 18
+    assert payload["snapshot_loaded"] is False
+    assert payload["outputs_written"] is False
+    assert payload["provider_access"] is False
+    assert payload["labels_joined"] is False
+    assert payload["production_change"] is False
 
 
 def test_builder_metadata_roles_and_source_fields_are_preserved(
@@ -358,9 +585,40 @@ def _row(
 def _config() -> dict[str, object]:
     return {
         "research_only": True,
+        "labels_joined": False,
+        "production_change": False,
         "config_version": "unit-test-v1",
+        "created_for_phase": "Phase 2.39 synthetic tests",
         "as_of_date": AS_OF_DATE,
         "parameter_source": "synthetic_test_fixture",
+        "preregistration": {
+            "status": "preregistered_unopened",
+            "forbidden_data_sources": [
+                "future_returns",
+                "future_highs_or_lows",
+                "realized_labels",
+                "winner_or_loser_status",
+                "case_study_answers",
+                "u1_or_u2_performance_outcomes",
+                "unavailable_external_historical_data",
+            ],
+            "intended_future_validation_holdout": {
+                "holdout_id": "synthetic-unopened-holdout",
+                "window_ids": ["2099-01-31:20"],
+                "horizon_days": 20,
+                "benchmark": "CSI300",
+                "universe_definition": "synthetic_fixture",
+                "minimum_valid_sample_per_window": 10,
+                "minimum_valid_sample_per_cohort": 3,
+                "success_failure_rules": ["synthetic_test_rule"],
+                "replacement_policy": "preregister_before_inspection",
+                "excluded_consumed_evidence": [
+                    "2024_answer_key_windows",
+                    "u1_windows",
+                    "u2_windows",
+                ],
+            },
+        },
         "feature_bindings": {
             "volatility_20d": "technical_volatility_20d",
         },
