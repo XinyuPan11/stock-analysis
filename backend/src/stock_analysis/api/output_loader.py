@@ -8,6 +8,9 @@ from pathlib import Path
 import re
 from typing import Any
 
+from stock_analysis.api.opportunity_cohort_output import (
+    load_research_opportunity_cohorts,
+)
 from stock_analysis.research.candidate_tiering import (
     CANDIDATE_TIERING_CONFIG,
     TIER_SOURCE_LIST_IDS,
@@ -540,6 +543,17 @@ class OutputLoader:
             "lists": self._sanitize_payload(lists),
             "disclaimer": API_DISCLAIMER,
         }
+
+    def get_research_opportunity_cohorts(
+        self,
+        *,
+        as_of_date: str | None = None,
+    ) -> dict[str, Any]:
+        payload = load_research_opportunity_cohorts(
+            self.outputs_dir,
+            as_of_date=as_of_date,
+        )
+        return self._sanitize_payload(payload)
 
     def get_research_list_tiers(self) -> dict[str, Any]:
         source_lists = {

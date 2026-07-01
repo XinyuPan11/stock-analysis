@@ -142,6 +142,17 @@ def list_tiers_page(request: Request) -> HTMLResponse:
     return HTMLResponse(_candidate_tiers_html(payload))
 
 
+@router.get("/research/opportunity-cohorts", response_class=HTMLResponse)
+def opportunity_cohorts_page(
+    request: Request,
+    as_of_date: str | None = None,
+) -> HTMLResponse:
+    payload = get_loader(request).get_research_opportunity_cohorts(
+        as_of_date=as_of_date,
+    )
+    return HTMLResponse(_opportunity_cohorts_html(payload))
+
+
 @router.get("/lists/{list_id}", response_class=HTMLResponse)
 def list_detail_page(request: Request, list_id: str) -> HTMLResponse:
     payload = get_loader(request).get_research_list(list_id)
@@ -436,6 +447,19 @@ def research_lists(request: Request) -> dict[str, Any]:
 @router.get("/api/lists/tiers")
 def research_list_tiers(request: Request) -> dict[str, Any]:
     return get_loader(request).get_research_list_tiers()
+
+
+@router.get("/api/research/opportunity-cohorts")
+def research_opportunity_cohorts(
+    request: Request,
+    as_of_date: str | None = None,
+) -> Any:
+    payload = get_loader(request).get_research_opportunity_cohorts(
+        as_of_date=as_of_date,
+    )
+    if payload.get("status") == "blocked_unsafe_output":
+        return JSONResponse(payload, status_code=409)
+    return payload
 
 
 @router.get("/api/lists/{list_id}")
@@ -914,6 +938,117 @@ def _candidate_tiers_html(payload: dict[str, Any]) -> str:
     {data_quality_section}
     """
     return _page_shell("Research Candidate Tiers", body)
+
+
+def _opportunity_cohorts_html(payload: dict[str, Any]) -> str:
+    metadata = f"""
+    <section>
+      <h2>Output metadata</h2>
+      <dl>
+        <dt>status</dt><dd>{escape(str(payload.get("status") or ""))}</dd>
+        <dt>as_of_date</dt><dd>{escape(str(payload.get("as_of_date") or ""))}</dd>
+        <dt>config_version</dt><dd>{escape(str(payload.get("config_version") or ""))}</dd>
+        <dt>source_snapshot_path</dt><dd>{escape(str(payload.get("source_snapshot_path") or ""))}</dd>
+        <dt>provider_access</dt><dd>{escape(str(payload.get("provider_access", False)).lower())}</dd>
+        <dt>labels_joined</dt><dd>{escape(str(payload.get("labels_joined", False)).lower())}</dd>
+        <dt>production_change</dt><dd>{escape(str(payload.get("production_change", False)).lower())}</dd>
+      </dl>
+    </section>
+    """
+    state_notice = ""
+    if not payload.get("available"):
+        violations = ", ".join(
+            str(item) for item in _as_list(payload.get("safety_violations"))
+        )
+        detail = (
+            f"<p>Safety checks: {escape(violations)}</p>"
+            if violations
+            else ""
+        )
+        state_notice = f"""
+        <section class="notice">
+          <h2>Research output unavailable</h2>
+          <p>{escape(str(payload.get("message") or ""))}</p>
+          {detail}
+        </section>
+        """
+
+    sections = "".join(
+        _opportunity_cohort_group_html(group)
+        for group in _as_list(payload.get("groups"))
+        if isinstance(group, dict)
+    )
+    caveats = "".join(
+        f"<li>{escape(str(item))}</li>"
+        for item in _as_list(payload.get("caveats"))
+    )
+    body = f"""
+    <header class="topbar">
+      <div>
+        <a href="/lists" class="back-link">Back to research lists</a>
+        <h1>Research-only opportunity cohorts</h1>
+        <p>Generated H1-H5 membership inspection surface.</p>
+      </div>
+      <span class="badge">Research-only</span>
+    </header>
+
+    <section class="notice">
+      <h2>Research boundary</h2>
+      <ul>{caveats}</ul>
+    </section>
+
+    {state_notice}
+    {metadata}
+    {sections}
+    """
+    return _page_shell("Research-only opportunity cohorts", body)
+
+
+def _opportunity_cohort_group_html(group: dict[str, Any]) -> str:
+    items = _as_list(group.get("items"))
+    if not items:
+        table = (
+            '<p class="muted">'
+            "No members in this generated research cohort."
+            "</p>"
+        )
+    else:
+        rows = "".join(
+            "<tr>"
+            f"<td>{escape(str(item.get('symbol') or ''))}</td>"
+            f"<td>{escape(_fallback(item.get('rank'), ''))}</td>"
+            f"<td>{escape(str(item.get('captured_positive_lists') or ''))}</td>"
+            f"<td>{escape(str(item.get('captured_risk_lists') or ''))}</td>"
+            f"<td>{escape(str(item.get('annotation_status') or ''))}</td>"
+            f"<td>{escape(str(item.get('evidence_fields') or ''))}</td>"
+            f"<td>{escape(str(item.get('counter_evidence_fields') or ''))}</td>"
+            "</tr>"
+            for item in items
+            if isinstance(item, dict)
+        )
+        table = f"""
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>symbol</th><th>source rank</th><th>positive-list context</th><th>risk-list context</th><th>annotation status</th><th>evidence</th><th>counter-evidence</th></tr></thead>
+            <tbody>{rows}</tbody>
+          </table>
+        </div>
+        """
+    return f"""
+    <section>
+      <div class="research-heading">
+        <div>
+          <span class="muted">{escape(str(group.get("display_id") or ""))}</span>
+          <h2>{escape(str(group.get("cohort_id") or ""))}</h2>
+        </div>
+        <span class="badge">members: {escape(str(group.get("member_count", 0)))}</span>
+      </div>
+      <p>{escape(str(group.get("cohort_role") or ""))}</p>
+      <p class="notice-text">{escape(str(group.get("caveat") or ""))}</p>
+      <p class="muted">evaluated={escape(str(group.get("evaluated_count", 0)))}; blocked={escape(str(group.get("blocked_row_count", 0)))}</p>
+      {table}
+    </section>
+    """
 
 
 def _candidate_tier_section_html(tier: dict[str, Any]) -> str:
@@ -2054,6 +2189,7 @@ def _global_nav() -> str:
         ("/compare", "Compare"),
         ("/lists", "Lists"),
         ("/lists/tiers", "Research Tiers"),
+        ("/research/opportunity-cohorts", "H1-H5 Research"),
         ("/labels", "Labels"),
         ("/search", "Search"),
         ("/reports", "Reports"),
