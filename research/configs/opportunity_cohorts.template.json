@@ -1,0 +1,54 @@
+{
+  "research_only": true,
+  "config_version": "replace-before-use",
+  "as_of_date": "YYYY-MM-DD",
+  "parameter_source": "preregistered_before_holdout",
+  "feature_bindings": {
+    "volatility_20d": "technical_volatility_20d"
+  },
+  "cohorts": {
+    "low_position_revaluation_watch": {
+      "role": "opportunity_observation",
+      "parameters": {
+        "max_distance_to_60d_low": null,
+        "max_drawdown_60d": null,
+        "min_recent_acceleration_proxy": null,
+        "min_activity_change_20d": null
+      }
+    },
+    "trend_acceleration_with_crowding_guard": {
+      "role": "opportunity_observation",
+      "parameters": {
+        "min_recent_acceleration_proxy": null,
+        "min_pre_20d_return": null,
+        "min_crowding_proxy": null,
+        "min_distance_to_60d_high": null
+      }
+    },
+    "right_tail_opportunity_watch": {
+      "role": "opportunity_observation",
+      "parameters": {
+        "min_volatility_20d": null,
+        "min_recent_acceleration_proxy": null,
+        "min_activity_change_20d": null
+      }
+    },
+    "high_position_crowding_risk": {
+      "role": "risk_annotation",
+      "parameters": {
+        "min_distance_to_60d_high": null,
+        "min_crowding_proxy": null,
+        "min_volatility_20d": null
+      }
+    },
+    "false_breakout_risk": {
+      "role": "risk_annotation",
+      "parameters": {
+        "min_distance_to_60d_high": null,
+        "max_recent_acceleration_proxy": null,
+        "max_drawdown_60d": null,
+        "min_activity_change_20d": null
+      }
+    }
+  }
+}
