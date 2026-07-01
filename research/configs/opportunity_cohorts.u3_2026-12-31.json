@@ -1,0 +1,221 @@
+﻿{
+  "template_status": "preregistered_unopened_runnable_u3_date_binding",
+  "research_only": true,
+  "provider_access": false,
+  "labels_joined": false,
+  "production_change": false,
+  "config_version": "u3-2026-12-31-v1",
+  "created_for_phase": "Phase 3.4",
+  "as_of_date": "2026-12-31",
+  "parameter_source": "phase3.1-smoke-v1_date_binding_only",
+  "copied_from": "phase3.1-smoke-v1",
+  "parameter_change": false,
+  "tuning_change": false,
+  "date_binding_only_change": true,
+  "holdout_id": "u3-prospective-2026-h2-v1",
+  "parameter_status": "engineering_smoke_placeholders_not_validated_for_effectiveness_or_production",
+  "effectiveness_claim": false,
+  "production_eligible": false,
+  "feature_bindings": {
+    "volatility_20d": "technical_volatility_20d"
+  },
+  "preregistration": {
+    "status": "preregistered_unopened",
+    "created_at": "2026-07-01",
+    "created_by": "codex_for_user_review",
+    "rationale_document": "docs/PHASE3_4_U3_EXECUTION_READINESS_AND_CONFIG_DATE_BINDING_FIX.md",
+    "cohort_definition_version": "phase2.36",
+    "source_snapshot_schema_version": "phase2.37-feature-only-v1",
+    "forbidden_data_sources": [
+      "future_returns",
+      "future_highs_or_lows",
+      "realized_labels",
+      "winner_or_loser_status",
+      "case_study_answers",
+      "u1_or_u2_performance_outcomes",
+      "2024_answer_key_or_attribution_outcomes",
+      "unavailable_external_historical_data",
+      "later_or_reconstructed_future_membership"
+    ],
+    "intended_future_validation_holdout": {
+      "status": "prospective_unopened_phase3_3_registration_required_before_evaluation",
+      "holdout_id": "u3-prospective-2026-h2-v1",
+      "window_ids": [
+        "u3_2026-09-30_20d",
+        "u3_2026-12-31_20d"
+      ],
+      "horizon_days": 20,
+      "benchmark": "CSI300",
+      "universe_definition": "same-date frozen member-level research universe with complete point-in-time H1-H5 feature coverage",
+      "minimum_valid_sample_per_window": 100,
+      "minimum_valid_sample_per_cohort": 20,
+      "success_failure_rules": [
+        "insufficient_data: any required window has fewer than 100 valid universe rows or a cohort has fewer than 20 valid members",
+        "success: every unopened window satisfies the exact Phase 3.3 preregistered directional and risk gates with no contradictory severe-failure window",
+        "mixed: adequate samples exist but directional, downside, false-warning, or opportunity-cost evidence conflicts across windows",
+        "failure: adequate samples exist and one or more exact Phase 3.3 preregistered directional or risk gates fail"
+      ],
+      "replacement_policy": "technical_readiness_replacement_only_if_preregistered_before_any_outcome_inspection",
+      "excluded_consumed_evidence": [
+        "2024_answer_key_windows",
+        "u1_windows",
+        "u2_windows"
+      ]
+    },
+    "amendment_policy": {
+      "frozen_config_is_immutable": true,
+      "revision_requires_new_config_version": true,
+      "revision_requires_new_unopened_holdout": true,
+      "same_holdout_retuning_forbidden": true,
+      "failed_and_mixed_results_retained": true
+    }
+  },
+  "parameter_documentation": {
+    "low_position_revaluation_watch": {
+      "max_distance_to_60d_low": {
+        "direction": "less_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "Round low-position proximity boundary selected from feature meaning only."
+      },
+      "max_drawdown_60d": {
+        "direction": "less_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "Round completed-bar drawdown boundary, not an effectiveness estimate."
+      },
+      "min_recent_acceleration_proxy": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return_proxy",
+        "rationale": "Small positive boundary used only to exercise recovery logic."
+      },
+      "min_activity_change_20d": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_change",
+        "rationale": "Round positive boundary used only to exercise participation logic."
+      }
+    },
+    "trend_acceleration_with_crowding_guard": {
+      "min_recent_acceleration_proxy": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return_proxy",
+        "rationale": "Small positive boundary used only to exercise acceleration logic."
+      },
+      "min_pre_20d_return": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "Round positive completed-bar trend boundary chosen without performance evidence."
+      },
+      "min_crowding_proxy": {
+        "direction": "greater_than_or_equal",
+        "unit": "proxy_value",
+        "rationale": "Round upper-range boundary used only to exercise the separate warning."
+      },
+      "min_distance_to_60d_high": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "Round near-high boundary selected from feature interpretation only."
+      }
+    },
+    "right_tail_opportunity_watch": {
+      "min_volatility_20d": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_volatility",
+        "rationale": "Round elevated-volatility boundary with no right-tail effectiveness claim."
+      },
+      "min_recent_acceleration_proxy": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return_proxy",
+        "rationale": "Small positive boundary used only to exercise acceleration logic."
+      },
+      "min_activity_change_20d": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_change",
+        "rationale": "Round positive boundary used only to exercise participation logic."
+      }
+    },
+    "high_position_crowding_risk": {
+      "min_distance_to_60d_high": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "Round near-high boundary used only to exercise a non-blocking warning."
+      },
+      "min_crowding_proxy": {
+        "direction": "greater_than_or_equal",
+        "unit": "proxy_value",
+        "rationale": "Round upper-range boundary used only to exercise crowding context."
+      },
+      "min_volatility_20d": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_volatility",
+        "rationale": "Round elevated-volatility boundary used only for smoke execution."
+      }
+    },
+    "false_breakout_risk": {
+      "min_distance_to_60d_high": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "Round near-high boundary used only inside the unchanged source-list domain."
+      },
+      "max_recent_acceleration_proxy": {
+        "direction": "less_than_or_equal",
+        "unit": "decimal_return_proxy",
+        "rationale": "Neutral non-positive boundary used only to exercise as-of weakness logic."
+      },
+      "max_drawdown_60d": {
+        "direction": "less_than_or_equal",
+        "unit": "decimal_return",
+        "rationale": "Round completed-bar weakness boundary selected without later outcomes."
+      },
+      "min_activity_change_20d": {
+        "direction": "greater_than_or_equal",
+        "unit": "decimal_change",
+        "rationale": "Round positive boundary used only to exercise annotation logic."
+      }
+    }
+  },
+  "cohorts": {
+    "low_position_revaluation_watch": {
+      "role": "opportunity_observation",
+      "parameters": {
+        "max_distance_to_60d_low": 0.1,
+        "max_drawdown_60d": -0.2,
+        "min_recent_acceleration_proxy": 0.02,
+        "min_activity_change_20d": 0.3
+      }
+    },
+    "trend_acceleration_with_crowding_guard": {
+      "role": "opportunity_observation",
+      "parameters": {
+        "min_recent_acceleration_proxy": 0.03,
+        "min_pre_20d_return": 0.05,
+        "min_crowding_proxy": 0.7,
+        "min_distance_to_60d_high": -0.05
+      }
+    },
+    "right_tail_opportunity_watch": {
+      "role": "opportunity_observation",
+      "parameters": {
+        "min_volatility_20d": 0.15,
+        "min_recent_acceleration_proxy": 0.03,
+        "min_activity_change_20d": 0.3
+      }
+    },
+    "high_position_crowding_risk": {
+      "role": "risk_annotation",
+      "parameters": {
+        "min_distance_to_60d_high": -0.05,
+        "min_crowding_proxy": 0.7,
+        "min_volatility_20d": 0.15
+      }
+    },
+    "false_breakout_risk": {
+      "role": "risk_annotation",
+      "parameters": {
+        "min_distance_to_60d_high": -0.05,
+        "max_recent_acceleration_proxy": 0.0,
+        "max_drawdown_60d": -0.1,
+        "min_activity_change_20d": 0.3
+      }
+    }
+  }
+}
+
