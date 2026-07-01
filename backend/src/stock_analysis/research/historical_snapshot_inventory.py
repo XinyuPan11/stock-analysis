@@ -109,7 +109,7 @@ def inventory_historical_source_snapshots(
         "source_snapshot_path_pattern": str(
             outputs_root
             / "experiments"
-            / "member_level_asof_snapshot_<date>.csv"
+            / "historical_h1h5_source_snapshot_<date>.csv"
         ),
         "source_snapshot_format": {
             "required_columns": list(REQUIRED_COLUMNS),
@@ -258,7 +258,7 @@ def _inventory_window(
     source_path = (
         outputs_root
         / "experiments"
-        / f"member_level_asof_snapshot_{as_of_date}.csv"
+        / f"historical_h1h5_source_snapshot_{as_of_date}.csv"
     )
     source_inspection = _inspect_source_snapshot_header(
         source_path,

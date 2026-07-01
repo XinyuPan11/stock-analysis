@@ -167,11 +167,11 @@ No local source member-level snapshot was found for any Phase 3.6 historical
 date. The default required paths are:
 
 ```text
-outputs/experiments/member_level_asof_snapshot_2026-01-30.csv
-outputs/experiments/member_level_asof_snapshot_2026-03-31.csv
-outputs/experiments/member_level_asof_snapshot_2026-04-30.csv
-outputs/experiments/member_level_asof_snapshot_2026-02-27.csv
-outputs/experiments/member_level_asof_snapshot_2026-05-29.csv
+outputs/experiments/historical_h1h5_source_snapshot_2026-01-30.csv
+outputs/experiments/historical_h1h5_source_snapshot_2026-03-31.csv
+outputs/experiments/historical_h1h5_source_snapshot_2026-04-30.csv
+outputs/experiments/historical_h1h5_source_snapshot_2026-02-27.csv
+outputs/experiments/historical_h1h5_source_snapshot_2026-05-29.csv
 ```
 
 Therefore all three primary windows and both backup windows currently return
