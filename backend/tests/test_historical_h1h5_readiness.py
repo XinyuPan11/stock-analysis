@@ -170,12 +170,24 @@ def test_unsafe_flags_fail_readiness(
     assert result["status"] == status
 
 
-def test_missing_source_snapshot_blocks_without_provider_access() -> None:
+def test_missing_source_snapshot_blocks_without_provider_access(
+    tmp_path: Path,
+) -> None:
     def forbidden_network(*args: object, **kwargs: object) -> None:
         raise AssertionError(f"Unexpected network access: {args} {kwargs}")
 
+    isolated_repo = tmp_path / "repo"
+    isolated_configs = isolated_repo / "research" / "configs"
+    isolated_configs.mkdir(parents=True)
+    shutil.copyfile(
+        SOURCE_CONFIG_PATH,
+        isolated_configs / SOURCE_CONFIG_PATH.name,
+    )
+    for filename in HISTORICAL_CONFIG_FILENAMES.values():
+        shutil.copyfile(CONFIG_DIR / filename, isolated_configs / filename)
+
     with patch.object(socket, "create_connection", forbidden_network):
-        result = check_historical_readiness(REPO_ROOT)
+        result = check_historical_readiness(isolated_repo)
 
     assert result["status"] == "blocked"
     assert result["ready"] is False
