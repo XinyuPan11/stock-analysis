@@ -257,6 +257,27 @@ def test_incomplete_valid_label_horizon_is_rejected(
 
 
 @pytest.mark.parametrize(
+    "field",
+    ["cohort_member", "rank", "is_breakout_watch"],
+)
+def test_label_source_cannot_carry_builder_membership_fields(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    frozen = _frozen(tmp_path, _cohort_payload())
+    labels = _label_payload()
+    labels["records"][0][field] = True
+
+    with pytest.raises(HistoricalH1H5EvaluatorError) as exc_info:
+        _evaluate(frozen, labels, tmp_path / "labels.json")
+
+    assert exc_info.value.status == (
+        "blocked_label_source_membership_fields"
+    )
+    assert field in exc_info.value.details["forbidden_fields"]
+
+
+@pytest.mark.parametrize(
     ("horizon_days", "benchmark", "expected_status"),
     [
         (19, "CSI300", "blocked_horizon_mismatch"),

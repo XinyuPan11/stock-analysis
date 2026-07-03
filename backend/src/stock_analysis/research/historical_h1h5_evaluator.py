@@ -102,6 +102,25 @@ REQUIRED_LABEL_FIELDS: tuple[str, ...] = (
     "max_drawdown_during_holding",
     "label_future_rows_used_count",
 )
+LABEL_SOURCE_FORBIDDEN_MEMBERSHIP_FIELDS: frozenset[str] = frozenset(
+    {
+        "cohort_id",
+        "cohort_role",
+        "cohort_member",
+        "annotation_status",
+        "membership_reason",
+        "rank",
+        "captured_positive_lists",
+        "captured_risk_lists",
+        "is_breakout_watch",
+        "is_accumulation_watch",
+        "is_high_confidence",
+        "is_trend_leader",
+        "is_long_term_stable",
+        "is_rebound_watch",
+        "is_high_risk_active",
+    }
+)
 ALLOWED_PREJOIN_FUTURE_DIAGNOSTICS: frozenset[str] = frozenset(
     {"future_rows_excluded_count"}
 )
@@ -267,6 +286,45 @@ def load_explicit_label_source(path: str | Path) -> dict[str, Any]:
         source,
         status="blocked_invalid_label_source",
     )
+
+
+def validate_explicit_label_source(
+    payload: Mapping[str, Any],
+    *,
+    as_of_date: str,
+    horizon_days: int,
+    benchmark: str,
+) -> dict[str, Any]:
+    """Validate an explicit label source without joining cohort membership."""
+
+    _validate_execution_identity(
+        as_of_date=as_of_date,
+        horizon_days=horizon_days,
+        benchmark=benchmark,
+    )
+    frame = _validate_label_source(
+        payload,
+        as_of_date=as_of_date,
+        horizon_days=horizon_days,
+        benchmark=benchmark,
+    )
+    valid_count = int(frame["_valid_label"].sum())
+    return {
+        "status": "safe_label_source",
+        "validation_id": VALIDATION_ID,
+        "evidence_level": EVIDENCE_LEVEL,
+        "as_of_date": as_of_date,
+        "horizon_days": horizon_days,
+        "benchmark": benchmark,
+        "row_count": int(len(frame)),
+        "valid_label_count": valid_count,
+        "missing_label_count": int(len(frame) - valid_count),
+        "provider_access": False,
+        "production_change": False,
+        "label_window_complete": True,
+        "membership_joined": False,
+        "outputs_written": False,
+    }
 
 
 def evaluate_historical_h1h5_cohorts(
@@ -694,6 +752,18 @@ def _validate_label_source(
             "blocked_missing_label_fields",
             "Label source is missing required fields.",
             details={"missing_fields": missing},
+        )
+    forbidden_membership = sorted(
+        set(frame.columns) & LABEL_SOURCE_FORBIDDEN_MEMBERSHIP_FIELDS
+    )
+    if forbidden_membership:
+        raise HistoricalH1H5EvaluatorError(
+            "blocked_label_source_membership_fields",
+            (
+                "Label source must not carry builder-side membership "
+                "or ranking fields."
+            ),
+            details={"forbidden_fields": forbidden_membership},
         )
     frame = frame.loc[:, list(REQUIRED_LABEL_FIELDS)].copy()
     frame["symbol"] = frame["symbol"].astype(str).str.strip()
