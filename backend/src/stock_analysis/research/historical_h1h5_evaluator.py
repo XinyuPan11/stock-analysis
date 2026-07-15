@@ -17,6 +17,17 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from stock_analysis.research.historical_h1h5_label_definitions import (
+    FORBIDDEN_LABEL_SOURCE_COLUMNS,
+    REQUIRED_LABEL_SOURCE_COLUMNS,
+    HistoricalH1H5LabelDefinitionError,
+    validate_label_source_schema,
+)
+
+
+FROZEN_LABEL_DEFINITION_SHA256 = (
+    "98282FC01C3F2CE73C97A3A5F66CE62B8C927D27631852B15108A83499245BAF"
+)
 
 VALIDATION_ID = "h1h5-historical-sealed-v1"
 EVIDENCE_LEVEL = "historical_sealed_not_prospective"
@@ -86,22 +97,7 @@ REQUIRED_OUTPUT_FIELDS: tuple[str, ...] = (
     "builder_labels_joined",
     "production_change",
 )
-REQUIRED_LABEL_FIELDS: tuple[str, ...] = (
-    "symbol",
-    "as_of_date",
-    "horizon_days",
-    "benchmark",
-    "data_quality",
-    "future_return",
-    "benchmark_future_return",
-    "excess_return",
-    "winner",
-    "loser",
-    "severe_drawdown",
-    "right_tail",
-    "max_drawdown_during_holding",
-    "label_future_rows_used_count",
-)
+REQUIRED_LABEL_FIELDS: tuple[str, ...] = REQUIRED_LABEL_SOURCE_COLUMNS
 LABEL_SOURCE_FORBIDDEN_MEMBERSHIP_FIELDS: frozenset[str] = frozenset(
     {
         "cohort_id",
@@ -268,7 +264,7 @@ def load_frozen_cohort_output(
 
 
 def load_explicit_label_source(path: str | Path) -> dict[str, Any]:
-    """Load an explicit precomputed label JSON without provider fallback."""
+    """Load a frozen CSV/JSON label source without provider fallback."""
 
     source = Path(path)
     if not source.exists():
@@ -277,15 +273,46 @@ def load_explicit_label_source(path: str | Path) -> dict[str, Any]:
             "Explicit label source is missing.",
             details={"path": str(source)},
         )
-    if source.suffix.lower() != ".json":
+    suffix = source.suffix.lower()
+    if suffix == ".json":
+        return _read_json_object(
+            source,
+            status="blocked_invalid_label_source",
+        )
+    if suffix != ".csv":
         raise HistoricalH1H5EvaluatorError(
             "blocked_invalid_label_source",
-            "Label source must be a metadata-bearing JSON file.",
+            "Label source must be the frozen CSV or metadata-bearing JSON.",
         )
-    return _read_json_object(
-        source,
+    metadata_payload = _read_json_object(
+        source.with_suffix(".json"),
         status="blocked_invalid_label_source",
     )
+    metadata = metadata_payload.get("metadata")
+    if not isinstance(metadata, Mapping):
+        raise HistoricalH1H5EvaluatorError(
+            "blocked_invalid_label_source",
+            "CSV label source requires its metadata-bearing sibling JSON.",
+        )
+    expected_csv_sha = str(metadata.get("csv_sha256", "")).upper()
+    actual_csv_sha = _sha256(source)
+    if expected_csv_sha != actual_csv_sha:
+        raise HistoricalH1H5EvaluatorError(
+            "blocked_label_source_digest_mismatch",
+            "Label-source CSV does not match its sibling JSON metadata.",
+            details={"expected_sha256": expected_csv_sha, "actual_sha256": actual_csv_sha},
+        )
+    try:
+        frame = pd.read_csv(source, dtype={"symbol": str, "as_of_date": str})
+    except (OSError, UnicodeError, pd.errors.ParserError) as exc:
+        raise HistoricalH1H5EvaluatorError(
+            "blocked_invalid_label_source",
+            "Label-source CSV cannot be parsed.",
+        ) from exc
+    return {
+        "metadata": dict(metadata),
+        "records": _json_safe(frame.to_dict(orient="records")),
+    }
 
 
 def validate_explicit_label_source(
@@ -437,10 +464,10 @@ def evaluate_historical_h1h5_cohorts(
                     valid_label_count,
                 ),
                 "benchmark_excess_return": _mean(
-                    valid.get("excess_return")
+                    valid.get("excess_return_20d")
                 ),
                 "benchmark_excess_return_median": _median(
-                    valid.get("excess_return")
+                    valid.get("excess_return_20d")
                 ),
                 "right_tail_retention": _ratio(
                     right_tail_count,
@@ -731,6 +758,7 @@ def _validate_label_source(
         "horizon_days": horizon_days,
         "benchmark": benchmark,
         "label_window_complete": True,
+        "label_definition_sha256": FROZEN_LABEL_DEFINITION_SHA256,
         "provider_access": False,
         "production_change": False,
     }
@@ -746,25 +774,27 @@ def _validate_label_source(
             details={"mismatches": mismatches},
         )
     frame = pd.DataFrame(records)
-    missing = sorted(set(REQUIRED_LABEL_FIELDS) - set(frame.columns))
-    if missing:
-        raise HistoricalH1H5EvaluatorError(
-            "blocked_missing_label_fields",
-            "Label source is missing required fields.",
-            details={"missing_fields": missing},
-        )
     forbidden_membership = sorted(
-        set(frame.columns) & LABEL_SOURCE_FORBIDDEN_MEMBERSHIP_FIELDS
+        set(frame.columns)
+        & (LABEL_SOURCE_FORBIDDEN_MEMBERSHIP_FIELDS | FORBIDDEN_LABEL_SOURCE_COLUMNS)
     )
     if forbidden_membership:
         raise HistoricalH1H5EvaluatorError(
             "blocked_label_source_membership_fields",
             (
-                "Label source must not carry builder-side membership "
-                "or ranking fields."
+                "Label source must not carry cohort, list, ranking, "
+                "recommendation, provider, or mutable builder fields."
             ),
             details={"forbidden_fields": forbidden_membership},
         )
+    try:
+        validate_label_source_schema(frame.columns, as_of_date=as_of_date)
+    except HistoricalH1H5LabelDefinitionError as exc:
+        raise HistoricalH1H5EvaluatorError(
+            exc.status,
+            exc.message,
+            details=exc.details,
+        ) from exc
     frame = frame.loc[:, list(REQUIRED_LABEL_FIELDS)].copy()
     frame["symbol"] = frame["symbol"].astype(str).str.strip()
     if frame["symbol"].eq("").any() or frame["symbol"].duplicated().any():
@@ -772,11 +802,19 @@ def _validate_label_source(
             "blocked_invalid_label_symbols",
             "Label source requires unique non-empty symbols.",
         )
-    if not frame["as_of_date"].astype(str).eq(as_of_date).all():
-        raise HistoricalH1H5EvaluatorError(
-            "blocked_label_as_of_mismatch",
-            "Label source contains a wrong or mixed as-of date.",
-        )
+    row_identity = {
+        "validation_id": VALIDATION_ID,
+        "evidence_level": EVIDENCE_LEVEL,
+        "as_of_date": as_of_date,
+        "benchmark": benchmark,
+        "price_field": "adj_close",
+    }
+    for field, expected_value in row_identity.items():
+        if not frame[field].astype(str).eq(expected_value).all():
+            raise HistoricalH1H5EvaluatorError(
+                "blocked_label_row_identity_mismatch",
+                f"Label rows require {field}={expected_value}.",
+            )
     if not pd.to_numeric(
         frame["horizon_days"],
         errors="coerce",
@@ -785,13 +823,22 @@ def _validate_label_source(
             "blocked_label_horizon_mismatch",
             "Label rows do not match the explicit 20D horizon.",
         )
-    if not frame["benchmark"].astype(str).eq(benchmark).all():
+    converted_valid = frame["valid_label"].map(_as_bool)
+    if converted_valid.isna().any():
         raise HistoricalH1H5EvaluatorError(
-            "blocked_label_benchmark_mismatch",
-            "Label rows do not match the explicit benchmark.",
+            "blocked_invalid_label_values",
+            "valid_label must be boolean for every row.",
         )
-    frame["_valid_label"] = frame["data_quality"].astype(str).eq("ok")
+    frame["valid_label"] = converted_valid
+    frame["_valid_label"] = converted_valid
     valid = frame.loc[frame["_valid_label"]]
+    invalid = frame.loc[~frame["_valid_label"]]
+    reasons = frame["missing_label_reason"].fillna("").astype(str)
+    if reasons.loc[valid.index].ne("").any() or reasons.loc[invalid.index].eq("").any():
+        raise HistoricalH1H5EvaluatorError(
+            "blocked_invalid_missing_label_reason",
+            "Valid rows require an empty reason and invalid rows require one.",
+        )
     future_rows = pd.to_numeric(
         valid["label_future_rows_used_count"],
         errors="coerce",
@@ -802,10 +849,15 @@ def _validate_label_source(
             "Every valid label must use the complete 20 trading-day horizon.",
         )
     for field in (
-        "future_return",
-        "benchmark_future_return",
-        "excess_return",
-        "max_drawdown_during_holding",
+        "as_of_close",
+        "future_end_close",
+        "future_return_20d",
+        "benchmark_return_20d",
+        "excess_return_20d",
+        "max_future_close_20d",
+        "min_future_close_20d",
+        "max_upside_20d",
+        "max_drawdown_20d",
     ):
         numeric = pd.to_numeric(valid[field], errors="coerce")
         if numeric.isna().any() or not numeric.map(math.isfinite).all():
@@ -814,6 +866,12 @@ def _validate_label_source(
                 f"Valid labels require finite {field}.",
             )
         frame.loc[valid.index, field] = numeric
+        invalid_numeric = pd.to_numeric(invalid[field], errors="coerce")
+        if invalid_numeric.notna().any():
+            raise HistoricalH1H5EvaluatorError(
+                "blocked_invalid_label_values",
+                f"Invalid labels require null {field}.",
+            )
     for field in ("winner", "loser", "severe_drawdown", "right_tail"):
         converted = valid[field].map(_as_bool)
         if converted.isna().any():
@@ -822,6 +880,11 @@ def _validate_label_source(
                 f"Valid labels require boolean {field}.",
             )
         frame.loc[valid.index, field] = converted
+        if invalid[field].notna().any():
+            raise HistoricalH1H5EvaluatorError(
+                "blocked_invalid_label_values",
+                f"Invalid labels require null {field}.",
+            )
     if (
         frame.loc[valid.index, "winner"].astype(bool)
         & frame.loc[valid.index, "loser"].astype(bool)
@@ -830,6 +893,22 @@ def _validate_label_source(
             "blocked_contradictory_labels",
             "A valid label cannot be both winner and loser.",
         )
+    for index, row in valid.iterrows():
+        expected_return = float(row["future_end_close"]) / float(row["as_of_close"]) - 1.0
+        expected_excess = float(row["future_return_20d"]) - float(row["benchmark_return_20d"])
+        expected_upside = float(row["max_future_close_20d"]) / float(row["as_of_close"]) - 1.0
+        if not (
+            math.isclose(float(row["future_return_20d"]), expected_return, rel_tol=1e-12, abs_tol=1e-12)
+            and math.isclose(float(row["excess_return_20d"]), expected_excess, rel_tol=1e-12, abs_tol=1e-12)
+            and math.isclose(float(row["max_upside_20d"]), expected_upside, rel_tol=1e-12, abs_tol=1e-12)
+            and float(row["min_future_close_20d"]) <= float(row["max_future_close_20d"])
+            and float(row["max_drawdown_20d"]) <= 0.0
+        ):
+            raise HistoricalH1H5EvaluatorError(
+                "blocked_inconsistent_label_math",
+                "Continuous label metrics do not satisfy the frozen formulas.",
+                details={"symbol": str(row["symbol"]), "row_index": int(index)},
+            )
     return frame
 
 

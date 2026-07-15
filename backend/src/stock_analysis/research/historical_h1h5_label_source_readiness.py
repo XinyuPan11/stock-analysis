@@ -141,7 +141,9 @@ def check_historical_h1h5_label_source_readiness(
         "provider_access": False,
         "provider_fallback_available": False,
         "cache_prewarm_executed": False,
-        "labels_generated": False,
+        "labels_generated": all(
+            window.get("labels_generated") is True for window in windows
+        ),
         "labels_joined": False,
         "evaluator_run": False,
         "final_validation_outputs_written": False,
@@ -311,6 +313,8 @@ def check_historical_h1h5_label_source_window(
     )
     base["label_source_path"] = str(label_path)
     base["label_source_exists"] = label_path.exists()
+    if label_path.exists():
+        base["labels_generated"] = True
     if label_source_path is not None and not label_path.exists():
         return _window_blocked(
             base,
@@ -372,6 +376,14 @@ def check_historical_h1h5_label_source_window(
             "Label source contains symbols outside the frozen universe.",
             details={"extra_symbols": extra_symbols[:50]},
         )
+    missing_symbols = sorted(set(symbols) - label_symbols)
+    if missing_symbols:
+        return _window_blocked(
+            base,
+            "blocked_label_universe_mismatch",
+            "Label source must preserve every frozen-universe symbol.",
+            details={"missing_symbols": missing_symbols[:50]},
+        )
     return {
         **base,
         "status": "ready_for_evaluator_dry_run",
@@ -379,7 +391,7 @@ def check_historical_h1h5_label_source_window(
         "message": "Explicit label source and frozen cohort are ready.",
         "label_source_schema_status": "safe",
         "label_source": label_status,
-        "label_source_missing_frozen_symbols": len(set(symbols) - label_symbols),
+        "label_source_missing_frozen_symbols": 0,
         "no_provider_access_needed": True,
     }
 
