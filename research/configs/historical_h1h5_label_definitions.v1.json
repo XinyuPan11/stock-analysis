@@ -1,0 +1,197 @@
+{
+  "schema_version": "historical-h1h5-label-definitions-v1",
+  "validation_id": "h1h5-historical-sealed-v1",
+  "evidence_level": "historical_sealed_not_prospective",
+  "benchmark": "CSI300",
+  "horizon_days": 20,
+  "primary_windows": [
+    "2026-01-30",
+    "2026-03-31",
+    "2026-04-30"
+  ],
+  "prohibited_windows": [
+    "2024-01-31",
+    "2024-04-30",
+    "2024-07-31",
+    "2024-10-31",
+    "2024-02-29",
+    "2024-05-31",
+    "2024-08-30",
+    "2024-11-29",
+    "2025-02-28",
+    "2025-05-30",
+    "2025-08-29",
+    "2025-11-28",
+    "2026-09-30",
+    "2026-12-31"
+  ],
+  "price_and_horizon": {
+    "price_field": "adj_close",
+    "allow_close_fallback": false,
+    "calendar_source": "CSI300",
+    "as_of_date_required": true,
+    "future_dates_rule": "first_20_CSI300_trade_dates_strictly_after_as_of_date",
+    "symbol_requires_all_future_dates": true,
+    "benchmark_requires_all_future_dates": true,
+    "positive_finite_prices_required": true
+  },
+  "continuous_metrics": {
+    "as_of_close": {
+      "formula_id": "symbol_adj_close_on_as_of_date"
+    },
+    "future_end_close": {
+      "formula_id": "symbol_adj_close_on_20th_CSI300_trade_date_after_as_of"
+    },
+    "future_return_20d": {
+      "formula_id": "future_end_close_div_as_of_close_minus_1"
+    },
+    "benchmark_return_20d": {
+      "formula_id": "CSI300_end_adj_close_div_CSI300_as_of_adj_close_minus_1"
+    },
+    "excess_return_20d": {
+      "formula_id": "future_return_20d_minus_benchmark_return_20d"
+    },
+    "max_future_close_20d": {
+      "formula_id": "max_symbol_adj_close_across_20_future_calendar_dates"
+    },
+    "min_future_close_20d": {
+      "formula_id": "min_symbol_adj_close_across_20_future_calendar_dates"
+    },
+    "max_upside_20d": {
+      "formula_id": "max_future_close_20d_div_as_of_close_minus_1"
+    },
+    "max_drawdown_20d": {
+      "formula_id": "min_price_div_running_max_minus_1_over_as_of_plus_20_future_closes"
+    },
+    "valid_label": {
+      "formula_id": "all_identity_calendar_price_benchmark_and_schema_gates_pass"
+    },
+    "missing_label_reason": {
+      "formula_id": "first_failure_by_frozen_missing_reason_priority"
+    }
+  },
+  "boolean_labels": {
+    "winner": {
+      "method": "union_of_deterministic_top_tails",
+      "fields": [
+        "future_return_20d",
+        "excess_return_20d"
+      ],
+      "tail_fraction": 0.1,
+      "minimum_tail_count": 10,
+      "maximum_tail_share": 0.5,
+      "count_rounding": "ceil",
+      "sort": "metric_desc_symbol_asc",
+      "valid_labels_only": true
+    },
+    "loser": {
+      "method": "union_of_deterministic_bottom_tails",
+      "fields": [
+        "future_return_20d",
+        "excess_return_20d"
+      ],
+      "tail_fraction": 0.1,
+      "minimum_tail_count": 10,
+      "maximum_tail_share": 0.5,
+      "count_rounding": "ceil",
+      "sort": "metric_asc_symbol_asc",
+      "valid_labels_only": true
+    },
+    "severe_drawdown": {
+      "method": "threshold_inclusive",
+      "field": "max_drawdown_20d",
+      "operator": "<=",
+      "threshold": -0.2,
+      "valid_labels_only": true
+    },
+    "right_tail": {
+      "method": "quantile_threshold_inclusive",
+      "field": "future_return_20d",
+      "quantile": 0.8,
+      "interpolation": "linear",
+      "operator": ">=",
+      "valid_labels_only": true
+    }
+  },
+  "missing_label_policy": {
+    "valid_row_reason": "",
+    "priority": [
+      "price_field_ambiguity",
+      "missing_benchmark_data",
+      "missing_symbol_cache",
+      "missing_as_of_price",
+      "incomplete_20d_horizon",
+      "missing_future_path_price",
+      "missing_future_end_price",
+      "nonpositive_or_nonfinite_price",
+      "identity_or_schema_mismatch"
+    ],
+    "preserve_invalid_rows": true,
+    "invalid_numeric_values": null,
+    "invalid_boolean_values": null
+  },
+  "label_source_schema": {
+    "csv_path_template": "outputs/experiments/historical_h1h5_label_source_<as_of_date>_20d.csv",
+    "json_path_template": "outputs/experiments/historical_h1h5_label_source_<as_of_date>_20d.json",
+    "required_columns": [
+      "validation_id",
+      "evidence_level",
+      "as_of_date",
+      "horizon_days",
+      "benchmark",
+      "symbol",
+      "valid_label",
+      "missing_label_reason",
+      "as_of_close",
+      "future_end_close",
+      "future_return_20d",
+      "benchmark_return_20d",
+      "excess_return_20d",
+      "max_future_close_20d",
+      "min_future_close_20d",
+      "max_upside_20d",
+      "max_drawdown_20d",
+      "winner",
+      "loser",
+      "severe_drawdown",
+      "right_tail",
+      "label_future_rows_used_count",
+      "label_window_start_date",
+      "label_window_end_date",
+      "price_field"
+    ],
+    "exact_columns_only": true,
+    "forbidden_columns": [
+      "cohort_id",
+      "cohort_role",
+      "cohort_member",
+      "cohort_assignment",
+      "annotation_status",
+      "membership_reason",
+      "rank",
+      "list_id",
+      "list_name",
+      "list_membership",
+      "captured_positive_lists",
+      "captured_risk_lists",
+      "recommendation",
+      "recommendation_level",
+      "provider",
+      "provider_source",
+      "builder_score",
+      "builder_decision"
+    ]
+  },
+  "guardrails": {
+    "research_only": true,
+    "local_cache_only": true,
+    "provider_access": false,
+    "validation_prediction_inputs": false,
+    "labels_joined_by_builder": false,
+    "cohort_membership_mutation": false,
+    "production_change": false,
+    "generate_labels_in_phase3_12": false,
+    "run_evaluator_in_phase3_12": false,
+    "write_evaluation_outputs_in_phase3_12": false
+  }
+}

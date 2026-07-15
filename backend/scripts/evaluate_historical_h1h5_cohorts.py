@@ -118,11 +118,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         payload: dict[str, object] = {
             **result.report["metadata"],
+            "status": (
+                "evaluation_complete"
+                if args.write_output
+                else "evaluator_dry_run_complete"
+            ),
             "dry_run": not args.write_output,
             "outputs_written": False,
-            "cohorts": result.report["cohorts"],
+            "performance_results_exposed": args.write_output,
+            "underpowered_cohort_count": sum(
+                bool(row["underpowered"]) for row in result.report["cohorts"]
+            ),
         }
         if args.write_output:
+            payload["cohorts"] = result.report["cohorts"]
             payload["outputs"] = write_historical_h1h5_evaluation_outputs(
                 result,
                 outputs_dir=args.outputs_dir,

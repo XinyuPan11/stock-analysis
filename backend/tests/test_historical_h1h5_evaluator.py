@@ -370,6 +370,8 @@ def test_cli_dry_run_writes_no_files(tmp_path: Path) -> None:
     assert payload["labels_joined_by_evaluator"] is True
     assert payload["builder_labels_joined"] is False
     assert payload["provider_access"] is False
+    assert payload["performance_results_exposed"] is False
+    assert "cohorts" not in payload
     assert not outputs_dir.exists()
 
 
@@ -507,26 +509,40 @@ def _label_payload() -> dict[str, object]:
         valid = index < 23
         winner = valid and index % 5 == 0
         loser = valid and index % 5 == 1
+        future_return = 0.10 + index / 100 if valid else None
+        as_of_close = 100.0 if valid else None
+        future_end_close = (
+            as_of_close * (1.0 + future_return) if valid else None
+        )
         rows.append(
             {
-                "symbol": f"TEST{index:03d}",
+                "validation_id": "h1h5-historical-sealed-v1",
+                "evidence_level": "historical_sealed_not_prospective",
                 "as_of_date": AS_OF_DATE,
                 "horizon_days": 20,
                 "benchmark": "CSI300",
-                "data_quality": "ok" if valid else "missing_price",
-                "future_return": 0.10 + index / 100 if valid else None,
-                "benchmark_future_return": 0.05 if valid else None,
-                "excess_return": 0.05 + index / 100 if valid else None,
+                "symbol": f"TEST{index:03d}",
+                "valid_label": valid,
+                "missing_label_reason": "" if valid else "missing_symbol_cache",
+                "as_of_close": as_of_close,
+                "future_end_close": future_end_close,
+                "future_return_20d": future_return,
+                "benchmark_return_20d": 0.05 if valid else None,
+                "excess_return_20d": future_return - 0.05 if valid else None,
+                "max_future_close_20d": future_end_close,
+                "min_future_close_20d": as_of_close,
+                "max_upside_20d": future_return,
+                "max_drawdown_20d": -0.05 - index / 100 if valid else None,
                 "winner": winner if valid else None,
                 "loser": loser if valid else None,
                 "severe_drawdown": (
                     index % 4 == 0 if valid else None
                 ),
                 "right_tail": winner if valid else None,
-                "max_drawdown_during_holding": (
-                    -0.05 - index / 100 if valid else None
-                ),
                 "label_future_rows_used_count": 20 if valid else 0,
+                "label_window_start_date": "2026-04-01",
+                "label_window_end_date": "2026-04-29",
+                "price_field": "adj_close",
             }
         )
     return {
@@ -537,6 +553,9 @@ def _label_payload() -> dict[str, object]:
             "horizon_days": 20,
             "benchmark": "CSI300",
             "label_window_complete": True,
+            "label_definition_sha256": (
+                "98282FC01C3F2CE73C97A3A5F66CE62B8C927D27631852B15108A83499245BAF"
+            ),
             "provider_access": False,
             "production_change": False,
         },

@@ -306,22 +306,34 @@ def _label_payload(
     records = []
     for index, symbol in enumerate(SYMBOLS):
         valid = index < 2
+        future_return = 0.10 if valid else None
         records.append(
             {
-                "symbol": symbol,
+                "validation_id": "h1h5-historical-sealed-v1",
+                "evidence_level": "historical_sealed_not_prospective",
                 "as_of_date": as_of_date,
                 "horizon_days": 20,
                 "benchmark": "CSI300",
-                "data_quality": "ok" if valid else "missing_price",
-                "future_return": 0.1 if valid else None,
-                "benchmark_future_return": 0.05 if valid else None,
-                "excess_return": 0.05 if valid else None,
+                "symbol": symbol,
+                "valid_label": valid,
+                "missing_label_reason": "" if valid else "missing_symbol_cache",
+                "as_of_close": 100.0 if valid else None,
+                "future_end_close": 110.0 if valid else None,
+                "future_return_20d": future_return,
+                "benchmark_return_20d": 0.05 if valid else None,
+                "excess_return_20d": 0.05 if valid else None,
+                "max_future_close_20d": 110.0 if valid else None,
+                "min_future_close_20d": 100.0 if valid else None,
+                "max_upside_20d": 0.10 if valid else None,
+                "max_drawdown_20d": -0.10 if valid else None,
                 "winner": index == 0 if valid else None,
                 "loser": index == 1 if valid else None,
                 "severe_drawdown": False if valid else None,
                 "right_tail": index == 0 if valid else None,
-                "max_drawdown_during_holding": -0.1 if valid else None,
                 "label_future_rows_used_count": 20 if valid else 0,
+                "label_window_start_date": "2026-02-02",
+                "label_window_end_date": required_future_end,
+                "price_field": "adj_close",
             }
         )
     return {
@@ -332,6 +344,9 @@ def _label_payload(
             "horizon_days": 20,
             "benchmark": "CSI300",
             "label_window_complete": True,
+            "label_definition_sha256": (
+                "98282FC01C3F2CE73C97A3A5F66CE62B8C927D27631852B15108A83499245BAF"
+            ),
             "provider_access": False,
             "production_change": False,
             "required_future_end": required_future_end,
