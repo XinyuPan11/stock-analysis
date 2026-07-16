@@ -1,0 +1,265 @@
+{
+  "schema_version": "production-candidate-challengers-config-v1",
+  "challenger_config_id": "production-candidate-challengers",
+  "challenger_config_version": "phase4.2-v1",
+  "foundation_id": "production-candidate-research-foundation",
+  "foundation_version": "phase4.1-v1",
+  "production_baseline_id": "current-production-candidate-baseline",
+  "production_baseline_version": "production-candidate-baseline-v1",
+  "feature_config_id": "production-candidate-features",
+  "feature_config_version": "phase4.2-v1",
+  "feature_config_sha256": "9F95EC87C40314A848822ECB69EE631C1FFA9994FFBF81CD983AF4BF7B3D2940",
+  "feature_schema_version": "production_candidate_feature_matrix.v1",
+  "challenger_score_scale": [
+    0,
+    100
+  ],
+  "neutral_weight_policy": "equal_or_simple_balanced_engineering_weights_frozen_before_phase4_3_not_optimized_on_outcomes",
+  "challengers": [
+    {
+      "challenger_id": "trend_volume_quality_v1",
+      "challenger_version": "v1",
+      "challenger_family": "transparent_rule_based",
+      "purpose": "Trend quality with price-volume and amount confirmation.",
+      "components": [
+        {
+          "feature_id": "trend_acceleration_score",
+          "sign": 1,
+          "weight": 0.25,
+          "transform": "same_date_percentile"
+        },
+        {
+          "feature_id": "trend_smoothness_20",
+          "sign": 1,
+          "weight": 0.25,
+          "transform": "same_date_percentile"
+        },
+        {
+          "feature_id": "relative_amount_5_20",
+          "sign": 1,
+          "weight": 0.25,
+          "transform": "same_date_percentile"
+        },
+        {
+          "feature_id": "price_volume_agreement",
+          "sign": 1,
+          "weight": 0.25,
+          "transform": "same_date_percentile"
+        }
+      ],
+      "eligibility_prerequisites": [
+        {
+          "feature_id": "data_quality_status",
+          "operator": "equals",
+          "value": "ok"
+        }
+      ],
+      "research_status": "research_only",
+      "effectiveness_status": "not_evaluated",
+      "combination_formula": "weighted_mean_of_same_date_percentile_components_with_negative_sign_using_one_minus_percentile",
+      "missing_feature_behavior": "preserve_row_as_ineligible_with_missing_component_ids",
+      "tie_breaking": "challenger_score_desc_symbol_asc",
+      "candidate_output_behavior": "all_rows_no_boolean_truncation_optional_top_n_preview_only",
+      "production_change": false,
+      "inherited_evidence": false,
+      "parameters_tuned_on_outcomes": false
+    },
+    {
+      "challenger_id": "low_position_recovery_v1",
+      "challenger_version": "v1",
+      "challenger_family": "transparent_rule_based",
+      "purpose": "Low-position context with continuous recovery and activity confirmation.",
+      "components": [
+        {
+          "feature_id": "low_position_score",
+          "sign": 1,
+          "weight": 0.3333333333333333,
+          "transform": "same_date_percentile"
+        },
+        {
+          "feature_id": "recovery_strength_20",
+          "sign": 1,
+          "weight": 0.3333333333333333,
+          "transform": "same_date_percentile"
+        },
+        {
+          "feature_id": "relative_amount_5_20",
+          "sign": 1,
+          "weight": 0.3333333333333333,
+          "transform": "same_date_percentile"
+        }
+      ],
+      "eligibility_prerequisites": [
+        {
+          "feature_id": "data_quality_status",
+          "operator": "equals",
+          "value": "ok"
+        }
+      ],
+      "research_status": "research_only",
+      "effectiveness_status": "not_evaluated",
+      "combination_formula": "weighted_mean_of_same_date_percentile_components_with_negative_sign_using_one_minus_percentile",
+      "missing_feature_behavior": "preserve_row_as_ineligible_with_missing_component_ids",
+      "tie_breaking": "challenger_score_desc_symbol_asc",
+      "candidate_output_behavior": "all_rows_no_boolean_truncation_optional_top_n_preview_only",
+      "production_change": false,
+      "inherited_evidence": false,
+      "parameters_tuned_on_outcomes": false
+    },
+    {
+      "challenger_id": "mean_reversion_liquidity_v1",
+      "challenger_version": "v1",
+      "challenger_family": "transparent_rule_based",
+      "purpose": "Continuous mean-reversion opportunity with liquidity and data-quality guards.",
+      "components": [
+        {
+          "feature_id": "mean_reversion_opportunity_score",
+          "sign": 1,
+          "weight": 0.5,
+          "transform": "same_date_percentile"
+        },
+        {
+          "feature_id": "average_amount_20",
+          "sign": 1,
+          "weight": 0.25,
+          "transform": "same_date_percentile"
+        },
+        {
+          "feature_id": "amount_stability",
+          "sign": 1,
+          "weight": 0.25,
+          "transform": "same_date_percentile"
+        }
+      ],
+      "eligibility_prerequisites": [
+        {
+          "feature_id": "data_quality_status",
+          "operator": "equals",
+          "value": "ok"
+        },
+        {
+          "feature_id": "low_liquidity_warning",
+          "operator": "equals",
+          "value": false
+        }
+      ],
+      "research_status": "research_only",
+      "effectiveness_status": "not_evaluated",
+      "combination_formula": "weighted_mean_of_same_date_percentile_components_with_negative_sign_using_one_minus_percentile",
+      "missing_feature_behavior": "preserve_row_as_ineligible_with_missing_component_ids",
+      "tie_breaking": "challenger_score_desc_symbol_asc",
+      "candidate_output_behavior": "all_rows_no_boolean_truncation_optional_top_n_preview_only",
+      "production_change": false,
+      "inherited_evidence": false,
+      "parameters_tuned_on_outcomes": false
+    },
+    {
+      "challenger_id": "baseline_risk_adjusted_v1",
+      "challenger_version": "v1",
+      "challenger_family": "transparent_rule_based",
+      "purpose": "Frozen baseline score reference with separate research-only downside-risk adjustment.",
+      "components": [
+        {
+          "feature_id": "total_score",
+          "sign": 1,
+          "weight": 0.5,
+          "transform": "same_date_percentile"
+        },
+        {
+          "feature_id": "risk_score",
+          "sign": 1,
+          "weight": 0.25,
+          "transform": "same_date_percentile"
+        },
+        {
+          "feature_id": "left_tail_risk_score",
+          "sign": -1,
+          "weight": 0.25,
+          "transform": "same_date_percentile"
+        }
+      ],
+      "eligibility_prerequisites": [
+        {
+          "feature_id": "data_quality_status",
+          "operator": "equals",
+          "value": "ok"
+        }
+      ],
+      "research_status": "research_only",
+      "effectiveness_status": "not_evaluated",
+      "combination_formula": "weighted_mean_of_same_date_percentile_components_with_negative_sign_using_one_minus_percentile",
+      "missing_feature_behavior": "preserve_row_as_ineligible_with_missing_component_ids",
+      "tie_breaking": "challenger_score_desc_symbol_asc",
+      "candidate_output_behavior": "all_rows_no_boolean_truncation_optional_top_n_preview_only",
+      "production_change": false,
+      "inherited_evidence": false,
+      "parameters_tuned_on_outcomes": false
+    },
+    {
+      "challenger_id": "trend_minus_crowding_v1",
+      "challenger_version": "v1",
+      "challenger_family": "transparent_rule_based",
+      "purpose": "Trend acceleration and smoothness with a separate crowding-risk penalty.",
+      "components": [
+        {
+          "feature_id": "trend_acceleration_score",
+          "sign": 1,
+          "weight": 0.4,
+          "transform": "same_date_percentile"
+        },
+        {
+          "feature_id": "trend_smoothness_20",
+          "sign": 1,
+          "weight": 0.3,
+          "transform": "same_date_percentile"
+        },
+        {
+          "feature_id": "crowding_risk_score",
+          "sign": -1,
+          "weight": 0.3,
+          "transform": "same_date_percentile"
+        }
+      ],
+      "eligibility_prerequisites": [
+        {
+          "feature_id": "data_quality_status",
+          "operator": "equals",
+          "value": "ok"
+        }
+      ],
+      "research_status": "research_only",
+      "effectiveness_status": "not_evaluated",
+      "combination_formula": "weighted_mean_of_same_date_percentile_components_with_negative_sign_using_one_minus_percentile",
+      "missing_feature_behavior": "preserve_row_as_ineligible_with_missing_component_ids",
+      "tie_breaking": "challenger_score_desc_symbol_asc",
+      "candidate_output_behavior": "all_rows_no_boolean_truncation_optional_top_n_preview_only",
+      "production_change": false,
+      "inherited_evidence": false,
+      "parameters_tuned_on_outcomes": false
+    }
+  ],
+  "output_columns": [
+    "symbol",
+    "as_of_date",
+    "baseline_total_score",
+    "challenger_id",
+    "challenger_score",
+    "challenger_rank",
+    "eligibility_status",
+    "missing_component_count",
+    "missing_component_ids",
+    "research_status",
+    "effectiveness_status",
+    "provider_access",
+    "labels_joined",
+    "production_change",
+    "results_are_effectiveness_evidence"
+  ],
+  "optional_preview_top_n": 10,
+  "provider_access": false,
+  "labels_joined": false,
+  "production_change": false,
+  "effectiveness_status": "not_evaluated",
+  "parameters_tuned_on_outcomes": false,
+  "results_are_effectiveness_evidence": false
+}
