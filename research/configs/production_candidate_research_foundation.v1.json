@@ -1,0 +1,2032 @@
+{
+  "schema_version": "production-candidate-research-foundation-config-v1",
+  "foundation_id": "production-candidate-research-foundation",
+  "foundation_version": "phase4.1-v1",
+  "project_scope": "personal_A_share_daily_bar_post_market_research",
+  "baseline_manifest_path": "research/configs/production_candidate_baseline.v1.json",
+  "feature_schema_version": "production_candidate_feature_matrix.v1",
+  "label_schema_version": "production_candidate_label_matrix.v1",
+  "benchmark": "CSI300",
+  "supported_horizons": [
+    5,
+    10,
+    20
+  ],
+  "row_identities": {
+    "feature_matrix": [
+      "symbol",
+      "as_of_date"
+    ],
+    "label_matrix": [
+      "symbol",
+      "as_of_date",
+      "horizon_days"
+    ],
+    "feature_label_tables_separate": true
+  },
+  "feature_identity_fields": [
+    "dataset_version",
+    "symbol",
+    "as_of_date",
+    "latest_input_date",
+    "universe_id",
+    "source_snapshot_id",
+    "feature_schema_version",
+    "production_baseline_version",
+    "provider_access",
+    "labels_joined",
+    "leakage_guard_applied"
+  ],
+  "feature_families": [
+    "existing_production_factors",
+    "existing_production_outputs",
+    "trend_and_trend_quality",
+    "volume_price_confirmation",
+    "position_drawdown_recovery",
+    "mean_reversion_candidates",
+    "volatility_tail_risk",
+    "liquidity_tradability",
+    "h1_h5_continuousized",
+    "cross_sectional_context"
+  ],
+  "feature_registry": [
+    {
+      "feature_id": "momentum_20d",
+      "feature_family": "existing_production_factors",
+      "description": "20-trading-day adjusted-close return.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "21 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "momentum_60d",
+      "feature_family": "existing_production_factors",
+      "description": "60-trading-day adjusted-close return.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "61 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "momentum_120d",
+      "feature_family": "existing_production_factors",
+      "description": "120-trading-day adjusted-close return.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "121 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "above_ma20",
+      "feature_family": "existing_production_factors",
+      "description": "Adjusted close is above MA20.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "20 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "true_hypothesized_positive",
+      "type": "categorical",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "above_ma60",
+      "feature_family": "existing_production_factors",
+      "description": "Adjusted close is above MA60.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "true_hypothesized_positive",
+      "type": "categorical",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "ma_bullish_alignment",
+      "feature_family": "existing_production_factors",
+      "description": "MA5 greater than MA20 greater than MA60.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "true_hypothesized_positive",
+      "type": "categorical",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "rs_20d",
+      "feature_family": "existing_production_factors",
+      "description": "20-day return minus CSI300 return.",
+      "source_fields": [
+        "adj_close",
+        "CSI300_adj_close"
+      ],
+      "lookback_requirement": "21 common trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "rs_60d",
+      "feature_family": "existing_production_factors",
+      "description": "60-day return minus CSI300 return.",
+      "source_fields": [
+        "adj_close",
+        "CSI300_adj_close"
+      ],
+      "lookback_requirement": "61 common trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "rs_120d",
+      "feature_family": "existing_production_factors",
+      "description": "120-day return minus CSI300 return.",
+      "source_fields": [
+        "adj_close",
+        "CSI300_adj_close"
+      ],
+      "lookback_requirement": "121 common trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "volatility_20d",
+      "feature_family": "existing_production_factors",
+      "description": "20-day realized return volatility.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "21 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "lower_in_current_score",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "volatility_60d",
+      "feature_family": "existing_production_factors",
+      "description": "60-day realized return volatility.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "61 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "lower_in_current_score",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "max_drawdown_20d",
+      "feature_family": "existing_production_factors",
+      "description": "Maximum drawdown over 20 completed trading bars.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "20 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "shallower_in_current_score",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "max_drawdown_60d",
+      "feature_family": "existing_production_factors",
+      "description": "Maximum drawdown over 60 completed trading bars.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "shallower_in_current_score",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "avg_amount_20d",
+      "feature_family": "existing_production_factors",
+      "description": "Average trading amount over 20 bars.",
+      "source_fields": [
+        "amount"
+      ],
+      "lookback_requirement": "20 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_in_current_score",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "avg_amount_60d",
+      "feature_family": "existing_production_factors",
+      "description": "Average trading amount over 60 bars.",
+      "source_fields": [
+        "amount"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_in_current_score",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "avg_volume_20d",
+      "feature_family": "existing_production_factors",
+      "description": "Average volume over 20 bars.",
+      "source_fields": [
+        "volume"
+      ],
+      "lookback_requirement": "20 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_in_current_score",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "avg_volume_60d",
+      "feature_family": "existing_production_factors",
+      "description": "Average volume over 60 bars.",
+      "source_fields": [
+        "volume"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_in_current_score",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "total_score",
+      "feature_family": "existing_production_outputs",
+      "description": "Current 100-point sum of 17 weighted components.",
+      "source_fields": [
+        "production_score_components"
+      ],
+      "lookback_requirement": "same as component maximum 121 bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "unknown_after_u1_u2",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "momentum_score",
+      "feature_family": "existing_production_outputs",
+      "description": "Current momentum group contribution, maximum 25.",
+      "source_fields": [
+        "momentum_20d",
+        "momentum_60d",
+        "momentum_120d"
+      ],
+      "lookback_requirement": "121 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "unknown_after_u1_u2",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "trend_score",
+      "feature_family": "existing_production_outputs",
+      "description": "Current trend group contribution, maximum 20.",
+      "source_fields": [
+        "above_ma20",
+        "above_ma60",
+        "ma_bullish_alignment"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "unknown_after_u1_u2",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "relative_strength_score",
+      "feature_family": "existing_production_outputs",
+      "description": "Current relative-strength contribution, maximum 20.",
+      "source_fields": [
+        "rs_20d",
+        "rs_60d",
+        "rs_120d"
+      ],
+      "lookback_requirement": "121 common trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "unknown_after_u1_u2",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "risk_score",
+      "feature_family": "existing_production_outputs",
+      "description": "Current lower-volatility and shallower-drawdown contribution, maximum 20.",
+      "source_fields": [
+        "volatility_20d",
+        "volatility_60d",
+        "max_drawdown_20d",
+        "max_drawdown_60d"
+      ],
+      "lookback_requirement": "61 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "defensive_hypothesis_only",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "liquidity_score",
+      "feature_family": "existing_production_outputs",
+      "description": "Current liquidity contribution, maximum 15.",
+      "source_fields": [
+        "avg_amount_20d",
+        "avg_amount_60d",
+        "avg_volume_20d",
+        "avg_volume_60d"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "unknown_after_u1_u2",
+      "type": "continuous",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "production_eligibility_state",
+      "feature_family": "existing_production_outputs",
+      "description": "Current universe filter decision and reasons.",
+      "source_fields": [
+        "universe_status",
+        "listing_date",
+        "OHLC",
+        "volume",
+        "amount"
+      ],
+      "lookback_requirement": "60 calendar days plus listing history",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_failed_rows_outside_candidate_rank",
+      "expected_direction": "categorical",
+      "type": "categorical",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "production_risk_flags",
+      "feature_family": "existing_production_outputs",
+      "description": "Current scoring risk flags.",
+      "source_fields": [
+        "volatility_60d",
+        "max_drawdown_60d",
+        "max_drawdown",
+        "risk_score"
+      ],
+      "lookback_requirement": "available scoring row",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "risk_annotation_only",
+      "type": "categorical",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "production_list_memberships",
+      "feature_family": "existing_production_outputs",
+      "description": "Existing research-list membership flags.",
+      "source_fields": [
+        "candidate_label_fields",
+        "component_scores"
+      ],
+      "lookback_requirement": "same-date candidate cross section",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "descriptive_only",
+      "type": "categorical",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "trend_return_5d",
+      "feature_family": "trend_and_trend_quality",
+      "description": "Short completed-bar return.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "6 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "trend_slope_20d",
+      "feature_family": "trend_and_trend_quality",
+      "description": "Slope of log adjusted close over 20 bars.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "20 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "trend_persistence_20d",
+      "feature_family": "trend_and_trend_quality",
+      "description": "Share of positive or direction-consistent bars.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "21 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "trend_acceleration_20d",
+      "feature_family": "trend_and_trend_quality",
+      "description": "Recent 20-day return minus preceding 20-day return.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "41 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "distance_to_ma20",
+      "feature_family": "trend_and_trend_quality",
+      "description": "Adjusted-close distance from MA20.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "20 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "nonlinear_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "distance_to_ma60",
+      "feature_family": "trend_and_trend_quality",
+      "description": "Adjusted-close distance from MA60.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "nonlinear_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "breakout_distance_60d",
+      "feature_family": "trend_and_trend_quality",
+      "description": "Distance from prior 60-bar high using completed bars only.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "61 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_near_breakout_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "trend_noise_ratio_20d",
+      "feature_family": "trend_and_trend_quality",
+      "description": "Absolute net move divided by summed absolute daily moves.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "21 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_smoother_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "relative_volume_20d",
+      "feature_family": "volume_price_confirmation",
+      "description": "Latest completed volume relative to 20-day mean.",
+      "source_fields": [
+        "volume"
+      ],
+      "lookback_requirement": "20 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "context_dependent",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "amount_expansion_20d",
+      "feature_family": "volume_price_confirmation",
+      "description": "Recent amount relative to preceding amount baseline.",
+      "source_fields": [
+        "amount"
+      ],
+      "lookback_requirement": "40 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_confirmation_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "price_volume_agreement_20d",
+      "feature_family": "volume_price_confirmation",
+      "description": "Completed-bar price direction and volume expansion agreement.",
+      "source_fields": [
+        "adj_close",
+        "volume"
+      ],
+      "lookback_requirement": "21 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_confirmation_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "volume_persistence_20d",
+      "feature_family": "volume_price_confirmation",
+      "description": "Persistence of above-baseline volume.",
+      "source_fields": [
+        "volume"
+      ],
+      "lookback_requirement": "40 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_confirmation_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "turnover_rate_20d",
+      "feature_family": "volume_price_confirmation",
+      "description": "True turnover rate requiring point-in-time shares outstanding.",
+      "source_fields": [
+        "volume",
+        "historical_shares_outstanding"
+      ],
+      "lookback_requirement": "20 bars plus dated shares outstanding",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "unknown",
+      "type": "continuous",
+      "production_status": "requires_external_data",
+      "current_availability": "not_available",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "blocked"
+    },
+    {
+      "feature_id": "abnormal_volume_no_price_confirmation",
+      "feature_family": "volume_price_confirmation",
+      "description": "High relative volume without same-date completed price confirmation.",
+      "source_fields": [
+        "adj_close",
+        "volume"
+      ],
+      "lookback_requirement": "40 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_risk_hypothesis",
+      "type": "continuous",
+      "production_status": "risk_feature_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "distance_to_60d_high",
+      "feature_family": "position_drawdown_recovery",
+      "description": "Distance from rolling 60-bar high.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "nonlinear_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "distance_to_60d_low",
+      "feature_family": "position_drawdown_recovery",
+      "description": "Distance from rolling 60-bar low.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "nonlinear_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "drawdown_depth_60d",
+      "feature_family": "position_drawdown_recovery",
+      "description": "Current drawdown from rolling 60-bar peak.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "shallower_or_recovery_context",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "drawdown_duration_60d",
+      "feature_family": "position_drawdown_recovery",
+      "description": "Bars since rolling peak within 60 bars.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "context_dependent",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "recovery_strength_20d",
+      "feature_family": "position_drawdown_recovery",
+      "description": "Completed-bar recovery from recent trough.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "recovery_speed_20d",
+      "feature_family": "position_drawdown_recovery",
+      "description": "Recovery magnitude per completed bar since trough.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "low_position_score",
+      "feature_family": "position_drawdown_recovery",
+      "description": "Continuous combination of low-position and recovery context.",
+      "source_fields": [
+        "distance_to_60d_low",
+        "distance_to_60d_high",
+        "recovery_strength_20d"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "deviation_from_ma5",
+      "feature_family": "mean_reversion_candidates",
+      "description": "Adjusted-close deviation from MA5.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "5 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "reversion_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "deviation_from_ma20",
+      "feature_family": "mean_reversion_candidates",
+      "description": "Adjusted-close deviation from MA20.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "20 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "reversion_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "deviation_from_ma60",
+      "feature_family": "mean_reversion_candidates",
+      "description": "Adjusted-close deviation from MA60.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "reversion_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "return_zscore_20d",
+      "feature_family": "mean_reversion_candidates",
+      "description": "Latest completed return normalized by trailing return distribution.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "21 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "reversion_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "recent_drawdown_20d",
+      "feature_family": "mean_reversion_candidates",
+      "description": "Current drawdown from 20-bar peak.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "20 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "reversion_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "oversold_proxy_14d",
+      "feature_family": "mean_reversion_candidates",
+      "description": "Price-only completed-bar oversold proxy; exact formula not yet frozen.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "15 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_recovery_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "rebound_confirmation_score",
+      "feature_family": "mean_reversion_candidates",
+      "description": "Continuous recovery confirmation using price and volume.",
+      "source_fields": [
+        "adj_close",
+        "volume"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "volatility_adjusted_deviation_ma20",
+      "feature_family": "mean_reversion_candidates",
+      "description": "MA20 deviation divided by trailing realized volatility.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "21 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "reversion_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "downside_volatility_20d",
+      "feature_family": "volatility_tail_risk",
+      "description": "Volatility of negative completed returns.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "21 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "lower_risk_hypothesis",
+      "type": "continuous",
+      "production_status": "risk_feature_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "large_move_frequency_60d",
+      "feature_family": "volatility_tail_risk",
+      "description": "Frequency of large absolute moves using a training-frozen threshold.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "61 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_risk_hypothesis",
+      "type": "continuous",
+      "production_status": "risk_feature_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "right_tail_proxy_score",
+      "feature_family": "volatility_tail_risk",
+      "description": "As-of upside convexity proxy built only from past returns; not the right_tail label.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "121 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_opportunity_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "left_tail_risk_proxy",
+      "feature_family": "volatility_tail_risk",
+      "description": "As-of negative-tail proxy from past completed returns.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "121 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_risk_hypothesis",
+      "type": "continuous",
+      "production_status": "risk_feature_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "gap_discontinuity_proxy_20d",
+      "feature_family": "volatility_tail_risk",
+      "description": "Frequency and size of completed open-to-prior-close gaps.",
+      "source_fields": [
+        "open",
+        "close"
+      ],
+      "lookback_requirement": "21 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_risk_hypothesis",
+      "type": "continuous",
+      "production_status": "risk_feature_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "severe_drawdown_risk_proxy_score",
+      "feature_family": "volatility_tail_risk",
+      "description": "Past-path risk proxy; not the severe_drawdown label.",
+      "source_fields": [
+        "adj_close"
+      ],
+      "lookback_requirement": "121 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_risk_hypothesis",
+      "type": "continuous",
+      "production_status": "risk_feature_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "rolling_amount_20d",
+      "feature_family": "liquidity_tradability",
+      "description": "Rolling 20-day amount.",
+      "source_fields": [
+        "amount"
+      ],
+      "lookback_requirement": "20 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_tradability_hypothesis",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "missing_bar_rate_60d",
+      "feature_family": "liquidity_tradability",
+      "description": "Missing benchmark-calendar bars over 60 calendar days.",
+      "source_fields": [
+        "trade_date",
+        "CSI300_trade_date"
+      ],
+      "lookback_requirement": "60 calendar days",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "lower_better",
+      "type": "continuous",
+      "production_status": "risk_feature_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "nonpositive_ohlc_warning",
+      "feature_family": "liquidity_tradability",
+      "description": "Warning for nonpositive or inconsistent completed OHLC.",
+      "source_fields": [
+        "open",
+        "high",
+        "low",
+        "close"
+      ],
+      "lookback_requirement": "latest and quality window",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "true_is_invalid",
+      "type": "categorical",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "low_liquidity_warning",
+      "feature_family": "liquidity_tradability",
+      "description": "Current 20-day average amount below production filter.",
+      "source_fields": [
+        "amount"
+      ],
+      "lookback_requirement": "20 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "true_is_ineligible_currently",
+      "type": "categorical",
+      "production_status": "existing_production",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "tradability_status",
+      "feature_family": "liquidity_tradability",
+      "description": "Point-in-time tradability state when reliable.",
+      "source_fields": [
+        "historical_listing_status",
+        "historical_suspension_status"
+      ],
+      "lookback_requirement": "dated state as of date",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "categorical",
+      "type": "categorical",
+      "production_status": "requires_external_data",
+      "current_availability": "current_snapshot_limited",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "blocked"
+    },
+    {
+      "feature_id": "st_state",
+      "feature_family": "liquidity_tradability",
+      "description": "Historical ST state.",
+      "source_fields": [
+        "historical_st_status"
+      ],
+      "lookback_requirement": "dated state as of date",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "categorical",
+      "type": "categorical",
+      "production_status": "requires_external_data",
+      "current_availability": "current_snapshot_limited",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "blocked"
+    },
+    {
+      "feature_id": "delisting_risk_state",
+      "feature_family": "liquidity_tradability",
+      "description": "Historical delisting-risk state.",
+      "source_fields": [
+        "historical_delisting_status"
+      ],
+      "lookback_requirement": "dated state as of date",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "categorical",
+      "type": "categorical",
+      "production_status": "requires_external_data",
+      "current_availability": "current_snapshot_limited",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "blocked"
+    },
+    {
+      "feature_id": "data_quality_state",
+      "feature_family": "liquidity_tradability",
+      "description": "Combined price, history, cache, and provenance quality state.",
+      "source_fields": [
+        "quality_flags",
+        "coverage_metadata"
+      ],
+      "lookback_requirement": "same-date source snapshot",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "categorical",
+      "type": "categorical",
+      "production_status": "risk_feature_research_only",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "low_position_revaluation_score",
+      "feature_family": "h1_h5_continuousized",
+      "description": "New continuous H1 concept; inherits no H1 validation status.",
+      "source_fields": [
+        "distance_to_60d_low",
+        "drawdown_depth_60d",
+        "recovery_strength_20d",
+        "amount_expansion_20d"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "trend_acceleration_score",
+      "feature_family": "h1_h5_continuousized",
+      "description": "New continuous acceleration concept; inherits no H2 status.",
+      "source_fields": [
+        "trend_acceleration_20d",
+        "trend_persistence_20d"
+      ],
+      "lookback_requirement": "41 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "crowding_risk_score",
+      "feature_family": "h1_h5_continuousized",
+      "description": "Price/volume crowding proxy, not actual ownership crowding.",
+      "source_fields": [
+        "distance_to_60d_high",
+        "relative_volume_20d",
+        "volatility_20d"
+      ],
+      "lookback_requirement": "60 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_risk_hypothesis",
+      "type": "continuous",
+      "production_status": "risk_feature_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "right_tail_opportunity_score",
+      "feature_family": "h1_h5_continuousized",
+      "description": "New continuous opportunity proxy; not the right_tail outcome label.",
+      "source_fields": [
+        "right_tail_proxy_score",
+        "trend_acceleration_20d",
+        "amount_expansion_20d"
+      ],
+      "lookback_requirement": "121 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "false_breakout_risk_score",
+      "feature_family": "h1_h5_continuousized",
+      "description": "New continuous weakness-after-near-high risk proxy.",
+      "source_fields": [
+        "breakout_distance_60d",
+        "trend_acceleration_20d",
+        "abnormal_volume_no_price_confirmation"
+      ],
+      "lookback_requirement": "61 trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_risk_hypothesis",
+      "type": "continuous",
+      "production_status": "risk_feature_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "cross_sectional_percentile_rank",
+      "feature_family": "cross_sectional_context",
+      "description": "Same-date percentile transform fitted independently per as-of date.",
+      "source_fields": [
+        "registered_continuous_feature"
+      ],
+      "lookback_requirement": "same-date cross section",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "direction_inherits_source_feature",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_feature_matrix",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "market_relative_strength",
+      "feature_family": "cross_sectional_context",
+      "description": "Return relative to CSI300 on identical completed dates.",
+      "source_fields": [
+        "adj_close",
+        "CSI300_adj_close"
+      ],
+      "lookback_requirement": "feature-specific common horizon",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "implemented"
+    },
+    {
+      "feature_id": "benchmark_relative_trend",
+      "feature_family": "cross_sectional_context",
+      "description": "Stock trend minus CSI300 trend on identical completed bars.",
+      "source_fields": [
+        "adj_close",
+        "CSI300_adj_close"
+      ],
+      "lookback_requirement": "61 common trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "higher_hypothesized",
+      "type": "continuous",
+      "production_status": "candidate_research_only",
+      "current_availability": "derivable_from_local_daily_cache",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    },
+    {
+      "feature_id": "industry_relative_strength",
+      "feature_family": "cross_sectional_context",
+      "description": "Relative strength against point-in-time industry peers.",
+      "source_fields": [
+        "historical_industry_membership",
+        "adj_close"
+      ],
+      "lookback_requirement": "dated industry membership plus price history",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "unknown",
+      "type": "continuous",
+      "production_status": "requires_external_data",
+      "current_availability": "not_available",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "blocked"
+    },
+    {
+      "feature_id": "market_regime_context",
+      "feature_family": "cross_sectional_context",
+      "description": "Point-in-time CSI300 trend, volatility, and drawdown context.",
+      "source_fields": [
+        "CSI300_adj_close"
+      ],
+      "lookback_requirement": "up to 252 common trading bars",
+      "point_in_time_rule": "all source rows and state timestamps must be <= as_of_date",
+      "missing_value_policy": "preserve_missing_and_expose_quality_flag",
+      "expected_direction": "categorical_context",
+      "type": "categorical",
+      "production_status": "candidate_research_only",
+      "current_availability": "available_now",
+      "leakage_risk": "low_if_pit_rule_enforced",
+      "implementation_status": "contract_only"
+    }
+  ],
+  "label_matrix": {
+    "schema_version": "production_candidate_label_matrix.v1",
+    "phase3_12_reuse_policy": "The adj_close, CSI300 common-calendar, complete-horizon, 20D return, excess, max-upside, max-drawdown, and preserved-missingness math may be referenced; Phase 3.12 identity h1h5-historical-sealed-v1 is never overwritten or silently aliased.",
+    "new_version_required": true,
+    "provenance_fields": [
+      "label_schema_version",
+      "symbol",
+      "as_of_date",
+      "horizon_days",
+      "future_window_start",
+      "future_window_end",
+      "benchmark",
+      "valid_label",
+      "missing_label_reason",
+      "provider_access",
+      "generated_from_cache",
+      "label_definition_digest"
+    ],
+    "continuous_labels": [
+      {
+        "label_id": "future_return_5d",
+        "type": "continuous",
+        "horizon_days": 5,
+        "definition_status": "phase4_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "benchmark_return_5d",
+        "type": "continuous",
+        "horizon_days": 5,
+        "definition_status": "phase4_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "excess_return_5d",
+        "type": "continuous",
+        "horizon_days": 5,
+        "definition_status": "phase4_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "max_upside_5d",
+        "type": "continuous",
+        "horizon_days": 5,
+        "definition_status": "phase4_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "max_drawdown_5d",
+        "type": "continuous",
+        "horizon_days": 5,
+        "definition_status": "phase4_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "future_return_10d",
+        "type": "continuous",
+        "horizon_days": 10,
+        "definition_status": "phase4_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "benchmark_return_10d",
+        "type": "continuous",
+        "horizon_days": 10,
+        "definition_status": "phase4_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "excess_return_10d",
+        "type": "continuous",
+        "horizon_days": 10,
+        "definition_status": "phase4_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "max_upside_10d",
+        "type": "continuous",
+        "horizon_days": 10,
+        "definition_status": "phase4_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "max_drawdown_10d",
+        "type": "continuous",
+        "horizon_days": 10,
+        "definition_status": "phase4_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "future_return_20d",
+        "type": "continuous",
+        "horizon_days": 20,
+        "definition_status": "phase3_12_math_reusable_under_new_phase4_identity",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "benchmark_return_20d",
+        "type": "continuous",
+        "horizon_days": 20,
+        "definition_status": "phase3_12_math_reusable_under_new_phase4_identity",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "excess_return_20d",
+        "type": "continuous",
+        "horizon_days": 20,
+        "definition_status": "phase3_12_math_reusable_under_new_phase4_identity",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "max_upside_20d",
+        "type": "continuous",
+        "horizon_days": 20,
+        "definition_status": "phase3_12_math_reusable_under_new_phase4_identity",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "max_drawdown_20d",
+        "type": "continuous",
+        "horizon_days": 20,
+        "definition_status": "phase3_12_math_reusable_under_new_phase4_identity",
+        "feature_eligible": false
+      }
+    ],
+    "categorical_boolean_labels": [
+      {
+        "label_id": "winner",
+        "type": "boolean",
+        "definition_status": "horizon_specific_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "loser",
+        "type": "boolean",
+        "definition_status": "horizon_specific_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "right_tail",
+        "type": "boolean",
+        "definition_status": "horizon_specific_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "severe_drawdown",
+        "type": "boolean",
+        "definition_status": "horizon_specific_definition_to_freeze_before_generation",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "valid_label",
+        "type": "boolean",
+        "definition_status": "phase4_schema_required",
+        "feature_eligible": false
+      },
+      {
+        "label_id": "missing_label_reason",
+        "type": "categorical",
+        "definition_status": "phase4_schema_required",
+        "feature_eligible": false
+      }
+    ],
+    "alias_policy": "exact canonical IDs only; duplicate legacy aliases in one dataset are forbidden",
+    "generation_in_phase4_1": false
+  },
+  "data_inventory": {
+    "local_stock_daily_cache": {
+      "path": "data/cache/daily-use/baostock/stock_daily/adjusted",
+      "csv_file_count_observed": 5416,
+      "observed_date_range": [
+        "2022-09-05",
+        "2026-06-24"
+      ],
+      "note": "coverage differs by symbol"
+    },
+    "benchmark_cache": {
+      "aliases": [
+        "data/cache/daily-use/baostock/index_daily/raw/CSI300.csv",
+        "data/cache/daily-use/baostock/stock_daily/adjusted/sh.000300.csv",
+        "data/cache/daily-use/baostock/stock_daily/adjusted/sz.399300.csv"
+      ],
+      "best_observed_date_range": [
+        "2022-09-05",
+        "2026-06-24"
+      ],
+      "note": "raw CSI300.csv ends 2024-10-31; adjusted aliases extend to 2026-06-24 and require deterministic alias selection"
+    },
+    "existing_factor_snapshots": {
+      "path": "outputs/daily/factors_<as_of_date>.csv|json",
+      "observed_dates": [
+        "2024-01-31",
+        "2024-02-29",
+        "2024-04-30",
+        "2024-05-31",
+        "2024-07-31",
+        "2024-08-30",
+        "2024-10-31",
+        "2024-11-29",
+        "2025-02-28",
+        "2025-05-30",
+        "2025-08-29",
+        "2025-11-28",
+        "2026-01-30",
+        "2026-03-31",
+        "2026-04-30"
+      ]
+    },
+    "member_level_snapshots": {
+      "path": "research/inputs/member_level_asof_features_<as_of_date>.csv|json",
+      "observed_dates": [
+        "2024-10-31",
+        "2026-01-30",
+        "2026-03-31",
+        "2026-04-30"
+      ]
+    },
+    "historical_labels_and_validation": {
+      "status": "available_but_consumed_under_prior_identities",
+      "allowed_phase4_role": "diagnostic_or_development_only_after_explicit_reclassification"
+    },
+    "unavailable_or_unsafe": [
+      "point-in-time industry membership",
+      "point-in-time fundamentals",
+      "versioned policy and event data",
+      "historical ST/suspension/delisting state with complete provenance",
+      "true turnover without dated shares outstanding",
+      "real-time tick and intraday data"
+    ]
+  },
+  "data_roles": {
+    "consumed_windows": [
+      {
+        "as_of_date": "2024-01-31",
+        "source_identity": "answer_key_diagnostic",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2024-04-30",
+        "source_identity": "answer_key_diagnostic",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2024-07-31",
+        "source_identity": "answer_key_diagnostic",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2024-10-31",
+        "source_identity": "answer_key_diagnostic",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2024-02-29",
+        "source_identity": "u1",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2024-05-31",
+        "source_identity": "u1",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2024-08-30",
+        "source_identity": "u1",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2024-11-29",
+        "source_identity": "u1",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2025-02-28",
+        "source_identity": "u2",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2025-05-30",
+        "source_identity": "u2",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2025-08-29",
+        "source_identity": "u2",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2025-11-28",
+        "source_identity": "u2",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2026-01-30",
+        "source_identity": "h1h5-historical-sealed-v1",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2026-03-31",
+        "source_identity": "h1h5-historical-sealed-v1",
+        "role": "consumed_diagnostic_only"
+      },
+      {
+        "as_of_date": "2026-04-30",
+        "source_identity": "h1h5-historical-sealed-v1",
+        "role": "consumed_diagnostic_only"
+      }
+    ],
+    "reserved_windows": [
+      {
+        "as_of_date": "2026-09-30",
+        "source_identity": "u3-prospective-2026-h2-v1",
+        "role": "reserved_prospective_other_identity",
+        "reassignable_to_phase4": false
+      },
+      {
+        "as_of_date": "2026-12-31",
+        "source_identity": "u3-prospective-2026-h2-v1",
+        "role": "reserved_prospective_other_identity",
+        "reassignable_to_phase4": false
+      }
+    ],
+    "phase4_future_holdout": {
+      "status": "not_selected",
+      "selection_phase": "after_phase4_finalists_frozen",
+      "selected_windows": []
+    },
+    "phase4_3_role": "comparative_chronological_out_of_sample_research_not_final_prospective_proof",
+    "consumed_reuse_policy": "development_or_diagnostic_only_with_explicit_reclassification; never fresh unseen final proof"
+  },
+  "walk_forward_contract": {
+    "split_method": "chronological_only_no_random_split",
+    "available_cache_boundary": [
+      "2022-09-05",
+      "2026-06-24"
+    ],
+    "fold_dates": "not_frozen_in_phase4_1; must be selected only from verified local PIT coverage before Phase4.3",
+    "training_window": "expanding",
+    "minimum_training_history_trading_days": 252,
+    "test_window_trading_days": 20,
+    "rebalance_frequency": "monthly_first_CSI300_trading_day",
+    "horizons_days": [
+      5,
+      10,
+      20
+    ],
+    "purge_rule": "training labels must end strictly before each test as_of_date; purge up to maximum 20-trading-day label overlap",
+    "embargo_trading_days": 20,
+    "minimum_feature_history_rule": "row valid only when every challenger-required lookback is complete; global maximum registry lookback currently 252 bars",
+    "minimum_symbol_count_per_as_of": 100,
+    "minimum_feature_coverage_ratio": null,
+    "minimum_feature_coverage_status": "preregistration_required_before_comparative_validation",
+    "symbol_state_policy": {
+      "delisted": "retain historical row only with reliable PIT state; otherwise flag unavailable and exclude from claims",
+      "suspended": "preserve row with tradability/missing-bar status; do not forward-fill feature evidence across missing bars",
+      "st": "use only reliably dated state; current snapshot cannot be treated as historical truth",
+      "missing_data": "preserve missingness and quality reason; no silent zero imputation unless a challenger preregisters training-only imputation"
+    }
+  },
+  "evaluation_metrics": {
+    "factor_level": [
+      "feature_coverage",
+      "missing_value_rate",
+      "cross_sectional_dispersion",
+      "quantile_returns",
+      "quantile_excess_returns",
+      "top_minus_bottom_spread",
+      "rank_ic",
+      "ic_stability",
+      "monotonicity",
+      "turnover",
+      "feature_drift",
+      "market_regime_sensitivity"
+    ],
+    "candidate_level": [
+      "candidate_count",
+      "coverage",
+      "winner_capture",
+      "loser_contamination",
+      "right_tail_retention",
+      "severe_drawdown_incidence",
+      "average_excess_return",
+      "median_excess_return",
+      "top_n_precision",
+      "candidate_stability",
+      "baseline_overlap",
+      "incremental_candidates_introduced",
+      "baseline_candidates_removed"
+    ],
+    "portfolio_level": [
+      "cumulative_return",
+      "annualized_return_if_supported",
+      "excess_return_vs_CSI300",
+      "maximum_drawdown",
+      "volatility",
+      "sharpe_ratio",
+      "calmar_ratio",
+      "hit_rate",
+      "payoff_ratio",
+      "turnover",
+      "estimated_transaction_cost",
+      "post_cost_return",
+      "industry_concentration_if_reliable",
+      "single_name_concentration",
+      "window_dependence",
+      "regime_dependence"
+    ],
+    "interpretation_dimensions": [
+      "predictive_performance",
+      "ranking_performance",
+      "portfolio_performance",
+      "risk_control_value",
+      "operational_feasibility"
+    ],
+    "single_metric_pass_forbidden": true
+  },
+  "challenger_hierarchy": [
+    {
+      "level": 0,
+      "family": "current_production_baseline",
+      "examples": [
+        "current total_score",
+        "current candidate rules",
+        "current production research lists"
+      ],
+      "implementation_phase": "already_exists_frozen"
+    },
+    {
+      "level": 1,
+      "family": "single_continuous_factors",
+      "examples": [
+        "each registered candidate feature separately"
+      ],
+      "implementation_phase": "Phase 4.2+"
+    },
+    {
+      "level": 2,
+      "family": "transparent_rule_based",
+      "examples": [
+        "trend quality + volume confirmation",
+        "low position + recovery confirmation",
+        "mean-reversion deviation + liquidity filter",
+        "trend score minus crowding-risk penalty",
+        "production score plus independent risk filter"
+      ],
+      "implementation_phase": "Phase 4.2+"
+    },
+    {
+      "level": 3,
+      "family": "statistical_linear",
+      "examples": [
+        "regularized linear regression",
+        "logistic regression",
+        "training-only transparent weighted score"
+      ],
+      "implementation_phase": "after contracts frozen"
+    },
+    {
+      "level": 4,
+      "family": "tree_based_ml_rankers",
+      "examples": [
+        "shallow Random Forest",
+        "constrained LightGBM or XGBoost",
+        "ranking model if dependencies and data support it"
+      ],
+      "implementation_phase": "after matrix and chronological validation frozen"
+    }
+  ],
+  "allowed_statuses": [
+    "rejected",
+    "research_only",
+    "shadow_test_eligible",
+    "production_design_eligible",
+    "invalid_execution",
+    "insufficient_data"
+  ],
+  "status_governance": {
+    "rejected": [
+      "material_negative_evidence",
+      "structurally_unsafe_or_leaky",
+      "worse_than_baseline_without_offsetting_risk_value"
+    ],
+    "research_only": [
+      "interesting_but_mixed",
+      "insufficient_sample",
+      "unstable_across_windows",
+      "mainly_explanatory"
+    ],
+    "shadow_test_eligible": [
+      "repeated_positive_chronological_oos_evidence",
+      "sufficient_coverage",
+      "no_unacceptable_risk_deterioration",
+      "no_obvious_leakage",
+      "operationally_reproducible",
+      "no_default_production_change"
+    ],
+    "production_design_eligible": [
+      "clear_incremental_value_over_frozen_baseline",
+      "multiple_chronological_test_windows",
+      "not_dominated_by_one_window_or_few_stocks",
+      "acceptable_post_cost_and_risk",
+      "reproducible_and_monitorable",
+      "later_prospective_or_shadow_evidence_still_required"
+    ],
+    "invalid_execution": [
+      "leakage",
+      "identity_or_schema_drift",
+      "unsafe_provider_or_production_flag",
+      "window_governance_violation"
+    ],
+    "insufficient_data": [
+      "coverage_or_history_gate_not_met"
+    ],
+    "numeric_gate_placeholders": {
+      "factor": null,
+      "candidate": null,
+      "portfolio": null,
+      "status": "must_be_preregistered_before_comparative_validation"
+    }
+  },
+  "comparison_output_contract": {
+    "paths": [
+      "outputs/research/production_candidate_comparison_<run_id>.json",
+      "outputs/research/production_candidate_comparison_<run_id>.csv"
+    ],
+    "required_fields": [
+      "run_id",
+      "dataset_version",
+      "baseline_version",
+      "feature_schema_version",
+      "label_schema_version",
+      "challenger_id",
+      "challenger_family",
+      "training_window",
+      "test_window",
+      "horizon",
+      "candidate_count",
+      "factor_metrics",
+      "candidate_metrics",
+      "portfolio_metrics",
+      "baseline_comparison",
+      "leakage_checks",
+      "data_sufficiency",
+      "status",
+      "limitations",
+      "production_change"
+    ],
+    "production_change": false,
+    "generate_in_phase4_1": false
+  },
+  "forbidden_feature_patterns": [
+    "future_return",
+    "benchmark_return",
+    "excess_return",
+    "max_upside",
+    "future_window",
+    "post_window_outcome",
+    "validation_result_status",
+    "answer_key_conclusion",
+    "cohort_effectiveness",
+    "production_decision_from_later_date"
+  ],
+  "privileged_label_feature_ids": [
+    "winner",
+    "loser",
+    "right_tail",
+    "severe_drawdown",
+    "valid_label",
+    "missing_label_reason"
+  ],
+  "production_governance": {
+    "no_phase4_1_authorization": [
+      "total_score_reweighting",
+      "candidate_rule_change",
+      "risk_exclusion_change",
+      "ML_production_ranking",
+      "behind_flag_integration",
+      "production_API_UI_change"
+    ],
+    "exact_numeric_gates_frozen_before_results": false,
+    "phase4_1_production_change_authorized": false
+  },
+  "audit_output_path": "outputs/research/production_candidate_foundation_audit.json",
+  "provider_access": false,
+  "labels_joined": false,
+  "production_change": false
+}
