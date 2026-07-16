@@ -1,0 +1,312 @@
+{
+  "schema_version": "production-candidate-baseline-manifest-v1",
+  "baseline_id": "current-production-candidate-baseline",
+  "baseline_version": "production-candidate-baseline-v1",
+  "captured_from_commit": "5f692914d17169d135d1c6da87de7e6c1e93525d",
+  "captured_on_branch": "phase4-1-production-candidate-research-foundation",
+  "captured_state": "main_after_phase3_15_merge",
+  "benchmark": "CSI300",
+  "supported_horizons": [
+    20
+  ],
+  "scoring_module_paths": [
+    "backend/src/stock_analysis/research/factors.py",
+    "backend/src/stock_analysis/research/scoring.py",
+    "backend/src/stock_analysis/research/recommendation_engine.py"
+  ],
+  "candidate_module_paths": [
+    "backend/src/stock_analysis/research/ashare_filters.py",
+    "backend/src/stock_analysis/research/pipeline.py",
+    "backend/src/stock_analysis/research/multi_label.py",
+    "backend/src/stock_analysis/research/multi_list.py",
+    "backend/scripts/generate_research_views.py"
+  ],
+  "workflow_module_paths": [
+    "backend/src/stock_analysis/workflow/config.py",
+    "backend/src/stock_analysis/workflow/steps.py",
+    "backend/src/stock_analysis/workflow/daily_workflow.py"
+  ],
+  "scoring_contract": {
+    "method": "sum_of_component_contributions",
+    "total_score_range": [
+      0,
+      100
+    ],
+    "group_weights": {
+      "momentum": 25,
+      "trend": 20,
+      "relative_strength": 20,
+      "risk": 20,
+      "liquidity": 15
+    },
+    "components": [
+      {
+        "factor_id": "momentum_20d",
+        "group": "momentum",
+        "weight": 7.5,
+        "normalization": "cross_sectional_percentile_rank_average_higher_better"
+      },
+      {
+        "factor_id": "momentum_60d",
+        "group": "momentum",
+        "weight": 10,
+        "normalization": "cross_sectional_percentile_rank_average_higher_better"
+      },
+      {
+        "factor_id": "momentum_120d",
+        "group": "momentum",
+        "weight": 7.5,
+        "normalization": "cross_sectional_percentile_rank_average_higher_better"
+      },
+      {
+        "factor_id": "above_ma20",
+        "group": "trend",
+        "weight": 6,
+        "normalization": "boolean_true_1_false_0"
+      },
+      {
+        "factor_id": "above_ma60",
+        "group": "trend",
+        "weight": 6,
+        "normalization": "boolean_true_1_false_0"
+      },
+      {
+        "factor_id": "ma_bullish_alignment",
+        "group": "trend",
+        "weight": 8,
+        "normalization": "boolean_true_1_false_0"
+      },
+      {
+        "factor_id": "rs_20d",
+        "group": "relative_strength",
+        "weight": 6,
+        "normalization": "cross_sectional_percentile_rank_average_higher_better"
+      },
+      {
+        "factor_id": "rs_60d",
+        "group": "relative_strength",
+        "weight": 8,
+        "normalization": "cross_sectional_percentile_rank_average_higher_better"
+      },
+      {
+        "factor_id": "rs_120d",
+        "group": "relative_strength",
+        "weight": 6,
+        "normalization": "cross_sectional_percentile_rank_average_higher_better"
+      },
+      {
+        "factor_id": "volatility_20d",
+        "group": "risk",
+        "weight": 6,
+        "normalization": "cross_sectional_percentile_rank_average_lower_better"
+      },
+      {
+        "factor_id": "volatility_60d",
+        "group": "risk",
+        "weight": 6,
+        "normalization": "cross_sectional_percentile_rank_average_lower_better"
+      },
+      {
+        "factor_id": "max_drawdown_20d",
+        "group": "risk",
+        "weight": 4,
+        "normalization": "absolute_drawdown_cross_sectional_percentile_rank_average_lower_better"
+      },
+      {
+        "factor_id": "max_drawdown_60d",
+        "group": "risk",
+        "weight": 4,
+        "normalization": "absolute_drawdown_cross_sectional_percentile_rank_average_lower_better"
+      },
+      {
+        "factor_id": "avg_amount_20d",
+        "group": "liquidity",
+        "weight": 5.25,
+        "normalization": "winsorize_5_95_then_cross_sectional_percentile_higher_better"
+      },
+      {
+        "factor_id": "avg_amount_60d",
+        "group": "liquidity",
+        "weight": 5.25,
+        "normalization": "winsorize_5_95_then_cross_sectional_percentile_higher_better"
+      },
+      {
+        "factor_id": "avg_volume_20d",
+        "group": "liquidity",
+        "weight": 2.25,
+        "normalization": "winsorize_5_95_then_cross_sectional_percentile_higher_better"
+      },
+      {
+        "factor_id": "avg_volume_60d",
+        "group": "liquidity",
+        "weight": 2.25,
+        "normalization": "winsorize_5_95_then_cross_sectional_percentile_higher_better"
+      }
+    ],
+    "missing_normalized_score": 0,
+    "numeric_coercion": "invalid_values_become_nan_before_normalization",
+    "rounding": "component_contribution_6dp_group_and_total_4dp"
+  },
+  "candidate_universe_rules": {
+    "stock_status": "exclude is_st/name_ST_or_delisting_terms/non_normal_listing_status/delisting_or_out_date",
+    "minimum_listing_days": 180,
+    "history_window_calendar_days": 60,
+    "minimum_valid_trading_days": 20,
+    "liquidity_window_trading_days": 20,
+    "minimum_average_amount_20d": 20000000,
+    "maximum_missing_ratio": 0.2,
+    "price_quality": "exclude nonpositive OHLC, OHLC inconsistency, sparse or suspended histories",
+    "point_in_time_rule": "daily bars sliced to trade_date <= as_of_date",
+    "universe_limitation": "stock universe and status fields can be current-snapshot-limited for historical dates"
+  },
+  "scoring_labels": {
+    "thresholds": {
+      "high_confidence": 88,
+      "candidate": 80,
+      "focus": 65,
+      "watch": 50,
+      "minimum_high_confidence_risk_score": 10,
+      "minimum_candidate_risk_score": 8
+    },
+    "precedence": [
+      "severe_risk",
+      "insufficient_data",
+      "high_confidence",
+      "candidate",
+      "focus",
+      "watch",
+      "high_risk_fallback",
+      "watch_fallback"
+    ],
+    "confidence_rule": "start_1_minus_data_flags_risk_flags_and_warning_penalties",
+    "missing_data_behavior": "required-factor or history warnings can map to data_insufficient when confidence_below_0_7",
+    "risk_behavior": "risk flags influence confidence and label; they do not alter total_score"
+  },
+  "sorting_rules": {
+    "production_candidate_rank": [
+      "total_score desc",
+      "confidence desc",
+      "risk_score desc",
+      "symbol asc"
+    ],
+    "score_frame_sort": [
+      "total_score desc",
+      "confidence desc",
+      "symbol asc"
+    ],
+    "tie_breaking": "symbol ascending after numeric keys"
+  },
+  "top_n_behavior": {
+    "research_pipeline_default": 20,
+    "daily_workflow_default": 10,
+    "static_multi_list_default": 30,
+    "behavior": "head(top_n) after sorting; no minimum fill guarantee"
+  },
+  "list_generation_rules": {
+    "high_confidence_candidates": {
+      "eligibility": "not insufficient; not high-risk-active; risk_level not high/mid-high/unknown; confidence high or mid-high",
+      "sort": [
+        "total_score desc",
+        "confidence desc",
+        "risk_score desc"
+      ]
+    },
+    "trend_leaders": {
+      "eligibility": "trend-leader primary or secondary tag; exclude high-risk",
+      "sort": [
+        "trend_score desc",
+        "momentum_score desc",
+        "relative_strength_score desc"
+      ]
+    },
+    "long_term_stable": {
+      "eligibility": "long-term-stable primary or secondary tag; exclude high-risk-active",
+      "sort": [
+        "risk_score desc",
+        "liquidity_score desc",
+        "trend_score desc"
+      ]
+    },
+    "breakout_watch": {
+      "eligibility": "breakout primary or secondary tag; risk note retained",
+      "sort": [
+        "momentum_score desc",
+        "trend_score desc",
+        "relative_strength_score desc"
+      ]
+    },
+    "accumulation_watch": {
+      "eligibility": "accumulation tag excluding high-risk; fallback normal/accumulation non-high-risk; excludes top 10 percent total_score in current implementation",
+      "sort": [
+        "trend_score desc",
+        "momentum_score desc",
+        "relative_strength_score desc",
+        "risk_score desc"
+      ]
+    },
+    "rebound_watch": {
+      "eligibility": "rebound primary or secondary tag; risk note retained",
+      "sort": [
+        "momentum_score desc",
+        "risk_score desc",
+        "total_score desc"
+      ]
+    },
+    "high_risk_active": {
+      "eligibility": "high-risk-active primary/secondary tag or high/mid-high risk level; observation only",
+      "sort": [
+        "total_score desc",
+        "momentum_score desc",
+        "liquidity_score desc"
+      ]
+    },
+    "insufficient_data": {
+      "eligibility": "primary_type is insufficient-data",
+      "sort": [
+        "rank asc"
+      ]
+    }
+  },
+  "risk_gates": {
+    "score_flags": {
+      "high_volatility_60d": 0.05,
+      "large_drawdown_60d_absolute": 0.25,
+      "severe_max_drawdown_absolute": 0.4,
+      "very_low_risk_score": 5
+    },
+    "exclusions": "universe quality filters exclude unsafe rows; high-risk research list is not a global automatic production exclusion",
+    "high_risk_active_status": "research warning observation; not confirmed as automatic exclusion"
+  },
+  "recommendation_language_mapping": {
+    "source_score_labels": [
+      "高置信候选",
+      "候选关注",
+      "重点观察",
+      "观察",
+      "风险过高",
+      "数据不足"
+    ],
+    "multi_label_actions": [
+      "重点研究",
+      "持续跟踪",
+      "谨慎观察",
+      "风险观察",
+      "数据补充后再评估"
+    ],
+    "prohibited_claims": [
+      "buy",
+      "sell",
+      "guaranteed_return",
+      "validated_alpha",
+      "inevitable_price_movement"
+    ]
+  },
+  "known_limitations": [
+    "U1/U2 did not confirm stable total_score ranking power.",
+    "Historical universe, listing, ST, and suspension states can be current-snapshot-limited.",
+    "Industry, fundamental, event, policy, and versioned historical status data are not reliably available.",
+    "Static lists overlap and are research views, not independent production portfolios.",
+    "The existing backtest uses equal-weight Top-N and is not Phase 4 comparative validation."
+  ],
+  "production_change": false
+}
